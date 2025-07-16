@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import ExcelJS from 'exceljs';
 import connectToDatabase from '@/app/lib/mongodb';
 import Token from '@/app/lib/models/Token';
+import { getStorageData, StorageItem } from '@/app/lib/storage-utils';
 
 interface DetailReportItem {
   rrd_id: number;
@@ -474,26 +475,167 @@ export async function POST(request: NextRequest) {
         break;
 
       case 'storage':
-        headers = ['Дата', 'Артикул', 'Склад', 'Дни хранения', 'Стоимость'];
+        // Подключаемся к базе данных и получаем токен
+        await connectToDatabase();
+        
+        let storageTokenDoc;
+        try {
+          storageTokenDoc = await Token.findById(tokenId);
+        } catch {
+          return NextResponse.json({ error: 'Невалидный ID токена' }, { status: 400 });
+        }
+        
+        if (!storageTokenDoc) {
+          return NextResponse.json({ error: 'Токен не найден' }, { status: 404 });
+        }
+
+        console.log('🚀 Начало создания отчета "Платное хранение"...');
+        const storageStartTime = Date.now();
+
+        // Получаем данные о платном хранении
+        const storageData = await getStorageData(storageTokenDoc.apiKey, startDate, endDate);
+
+        console.log(`📊 Проверка данных для отчета "Платное хранение". Записей: ${storageData.length}`);
+
         fileName = `Платное хранение - ${startDate}–${endDate}.xlsx`;
-        
-        // Добавляем заголовки
-        worksheet.addRow(headers);
-        const storageHeaderRow = worksheet.getRow(1);
-        storageHeaderRow.font = { bold: true };
-        storageHeaderRow.fill = {
-          type: 'pattern',
-          pattern: 'solid',
-          fgColor: { argb: 'FFE0E0E0' }
-        };
-        
-        headers.forEach((header, index) => {
-          const column = worksheet.getColumn(index + 1);
-          column.width = Math.max(header.length + 5, 15);
-        });
-        
-        // Добавляем пример данных (заглушка)
-        worksheet.addRow(['01.01.2025', 'WB123456', 'Коледино', '10', '50']);
+
+        if (storageData && storageData.length > 0) {
+          console.log("🚀 Создание отчета 'Платное хранение' с данными...");
+          
+          // Подготавливаем данные для Excel
+          const storageExcelData = storageData.map((item: StorageItem) => ({
+            "Дата": item.date || "",
+            "Склад": item.warehouse || "",
+            "Артикул Wildberries": item.nmId || "",
+            "Размер": item.size || "",
+            "Баркод": item.barcode || "",
+            "Предмет": item.subject || "",
+            "Бренд": item.brand || "",
+            "Артикул продавца": item.vendorCode || "",
+            "Объем (дм³)": item.volume || 0,
+            "Тип расчета": item.calcType || "",
+            "Сумма хранения": item.warehousePrice || 0,
+            "Количество баркодов": item.barcodesCount || 0,
+            "Коэффициент склада": item.warehouseCoef || 0,
+            "Скидка лояльности (%)": item.loyaltyDiscount || 0,
+            "Дата фиксации тарифа": item.tariffFixDate || "",
+            "Дата снижения тарифа": item.tariffLowerDate || "",
+          }));
+
+          headers = [
+            'Дата',
+            'Склад',
+            'Артикул Wildberries',
+            'Размер',
+            'Баркод',
+            'Предмет',
+            'Бренд',
+            'Артикул продавца',
+            'Объем (дм³)',
+            'Тип расчета',
+            'Сумма хранения',
+            'Количество баркодов',
+            'Коэффициент склада',
+            'Скидка лояльности (%)',
+            'Дата фиксации тарифа',
+            'Дата снижения тарифа'
+          ];
+
+          // Добавляем заголовки
+          worksheet.addRow(headers);
+          const storageHeaderRow = worksheet.getRow(1);
+          storageHeaderRow.font = { bold: true };
+          storageHeaderRow.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FFE0E0E0' }
+          };
+
+          // Настройка ширины колонок для оптимального отображения
+          const storageColumnWidths = [
+            { wch: 12 }, // Дата
+            { wch: 15 }, // Склад
+            { wch: 20 }, // Артикул Wildberries
+            { wch: 10 }, // Размер
+            { wch: 15 }, // Баркод
+            { wch: 25 }, // Предмет
+            { wch: 15 }, // Бренд
+            { wch: 15 }, // Артикул продавца
+            { wch: 12 }, // Объем
+            { wch: 20 }, // Тип расчета
+            { wch: 15 }, // Сумма хранения
+            { wch: 12 }, // Количество баркодов
+            { wch: 12 }, // Коэффициент склада
+            { wch: 15 }, // Скидка лояльности
+            { wch: 15 }, // Дата фиксации тарифа
+            { wch: 15 }, // Дата снижения тарифа
+          ];
+
+          storageColumnWidths.forEach((width, index) => {
+            const column = worksheet.getColumn(index + 1);
+            column.width = width.wch;
+          });
+
+          // Добавляем данные
+          storageExcelData.forEach(item => {
+            worksheet.addRow([
+              item["Дата"],
+              item["Склад"],
+              item["Артикул Wildberries"],
+              item["Размер"],
+              item["Баркод"],
+              item["Предмет"],
+              item["Бренд"],
+              item["Артикул продавца"],
+              item["Объем (дм³)"],
+              item["Тип расчета"],
+              item["Сумма хранения"],
+              item["Количество баркодов"],
+              item["Коэффициент склада"],
+              item["Скидка лояльности (%)"],
+              item["Дата фиксации тарифа"],
+              item["Дата снижения тарифа"]
+            ]);
+          });
+
+          console.log(`✅ Отчет 'Платное хранение' создан с ${storageData.length} записями за ${Date.now() - storageStartTime}мс`);
+        } else {
+          console.log("ℹ️ Нет данных для создания отчета 'Платное хранение' - создаем пустой шаблон");
+          
+          headers = [
+            'Дата',
+            'Склад',
+            'Артикул Wildberries',
+            'Размер',
+            'Баркод',
+            'Предмет',
+            'Бренд',
+            'Артикул продавца',
+            'Объем (дм³)',
+            'Тип расчета',
+            'Сумма хранения',
+            'Количество баркодов',
+            'Коэффициент склада',
+            'Скидка лояльности (%)',
+            'Дата фиксации тарифа',
+            'Дата снижения тарифа'
+          ];
+
+          // Добавляем заголовки для пустого шаблона
+          worksheet.addRow(headers);
+          const emptyHeaderRow = worksheet.getRow(1);
+          emptyHeaderRow.font = { bold: true };
+          emptyHeaderRow.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FFE0E0E0' }
+          };
+          
+          headers.forEach((header, index) => {
+            const column = worksheet.getColumn(index + 1);
+            column.width = Math.max(header.length + 5, 15);
+          });
+        }
         break;
 
       case 'acceptance':
