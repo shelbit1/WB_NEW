@@ -58,6 +58,7 @@ export default function ReportsPage() {
         body: JSON.stringify({
           reportType,
           clientName: selectedTokenData?.name,
+          tokenId: selectedToken,
           startDate,
           endDate
         })
@@ -74,7 +75,8 @@ export default function ReportsPage() {
         window.URL.revokeObjectURL(url);
         document.body.removeChild(a);
       } else {
-        alert('Ошибка при скачивании отчёта');
+        const errorData = await response.json();
+        alert(errorData.error || 'Ошибка при скачивании отчёта');
       }
     } catch (error) {
       console.error('Ошибка:', error);
