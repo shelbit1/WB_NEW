@@ -539,24 +539,149 @@ export async function POST(request: NextRequest) {
         break;
 
       case 'finances':
-        headers = ['Дата', 'Тип операции', 'Сумма', 'К доплате', 'К перечислению'];
-        fileName = `Финансы РК - ${startDate}–${endDate}.xlsx`;
+        // Подключаемся к базе данных и получаем токен
+        await connectToDatabase();
         
-        worksheet.addRow(headers);
-        const financesHeaderRow = worksheet.getRow(1);
-        financesHeaderRow.font = { bold: true };
-        financesHeaderRow.fill = {
-          type: 'pattern',
-          pattern: 'solid',
-          fgColor: { argb: 'FFE0E0E0' }
-        };
+        let financeTokenDoc;
+        try {
+          financeTokenDoc = await Token.findById(tokenId);
+        } catch (error) {
+          return NextResponse.json({ error: 'Невалидный ID токена' }, { status: 400 });
+        }
         
-        headers.forEach((header, index) => {
-          const column = worksheet.getColumn(index + 1);
-          column.width = Math.max(header.length + 5, 15);
-        });
+        if (!financeTokenDoc) {
+          return NextResponse.json({ error: 'Токен не найден' }, { status: 404 });
+        }
+
+        // Импортируем функции для работы с финансами РК
+        const { fetchCampaigns, fetchSKUData, fetchFinancialData } = await import('@/app/lib/finance-utils');
+
+        console.log('🚀 Начало создания листа "Финансы РК"...');
+        const financeStartTime = Date.now();
+
+        // Получаем кампании
+        const campaigns = await fetchCampaigns(financeTokenDoc.apiKey);
         
-        worksheet.addRow(['01.01.2025', 'Продажа', '1500', '0', '1275']);
+        // Получаем финансовые данные с буферными днями
+        const financialData = await fetchFinancialData(financeTokenDoc.apiKey, startDate, endDate);
+
+        console.log(`📊 Проверка данных для листа "Финансы РК". Кампаний: ${campaigns.length}, финансовых записей: ${financialData.length}`);
+
+        if (campaigns.length > 0 && financialData.length > 0) {
+          console.log("🚀 Создание листа 'Финансы РК'...");
+          
+          // Получаем SKU данные
+          console.log(`📊 Получение SKU данных для кампаний...`);
+          const skuMap = await fetchSKUData(financeTokenDoc.apiKey, campaigns);
+          console.log(`📊 Использование готовых SKU данных: ${skuMap.size} кампаний`);
+          
+          // Создаем карту кампаний для быстрого поиска
+          const campaignMap = new Map(campaigns.map(c => [c.advertId, c]));
+          
+          // Подготавливаем данные для листа "Финансы РК"
+          const financeExcelData = financialData.map(record => {
+            const campaign = campaignMap.get(record.advertId);
+            return {
+              "ID кампании": record.advertId,
+              "Название кампании": campaign?.name || 'Неизвестная кампания',
+              "SKU ID": skuMap.get(record.advertId) || '',
+              "Дата": record.date,
+              "Сумма": record.sum,
+              "Источник списания": record.bill === 1 ? 'Счет' : 'Баланс',
+              "Тип операции": record.type,
+              "Номер документа": record.docNumber
+            };
+          });
+
+          headers = [
+            'ID кампании',
+            'Название кампании', 
+            'SKU ID',
+            'Дата',
+            'Сумма',
+            'Источник списания',
+            'Тип операции',
+            'Номер документа'
+          ];
+
+          fileName = `Финансы РК - ${startDate}–${endDate}.xlsx`;
+
+          // Добавляем заголовки
+          worksheet.addRow(headers);
+
+          // Стилизуем заголовки
+          const financesHeaderRow = worksheet.getRow(1);
+          financesHeaderRow.font = { bold: true };
+          financesHeaderRow.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FFE0E0E0' }
+          };
+
+          // Настройка ширины колонок для листа "Финансы РК"
+          const financeColumnWidths = [
+            { wch: 15 }, // ID кампании
+            { wch: 30 }, // Название кампании
+            { wch: 15 }, // SKU ID
+            { wch: 15 }, // Дата
+            { wch: 15 }, // Сумма
+            { wch: 20 }, // Источник списания
+            { wch: 15 }, // Тип операции
+            { wch: 20 }, // Номер документа
+          ];
+          
+          headers.forEach((header, index) => {
+            const column = worksheet.getColumn(index + 1);
+            column.width = financeColumnWidths[index]?.wch || Math.max(header.length + 5, 15);
+          });
+
+          // Добавляем данные
+          financeExcelData.forEach(item => {
+            worksheet.addRow([
+              item["ID кампании"],
+              item["Название кампании"],
+              item["SKU ID"],
+              item["Дата"],
+              item["Сумма"],
+              item["Источник списания"],
+              item["Тип операции"],
+              item["Номер документа"]
+            ]);
+          });
+
+          console.log(`✅ Лист "Финансы РК" создан за ${Date.now() - financeStartTime}ms с ${financeExcelData.length} записями`);
+          
+        } else {
+          console.log("ℹ️ Нет данных для создания листа 'Финансы РК' - создаем пустой шаблон");
+          
+          headers = [
+            'ID кампании',
+            'Название кампании', 
+            'SKU ID',
+            'Дата',
+            'Сумма',
+            'Источник списания',
+            'Тип операции',
+            'Номер документа'
+          ];
+
+          fileName = `Финансы РК - ${startDate}–${endDate}.xlsx`;
+
+          // Добавляем заголовки для пустого шаблона
+          worksheet.addRow(headers);
+          const emptyHeaderRow = worksheet.getRow(1);
+          emptyHeaderRow.font = { bold: true };
+          emptyHeaderRow.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FFE0E0E0' }
+          };
+          
+          headers.forEach((header, index) => {
+            const column = worksheet.getColumn(index + 1);
+            column.width = Math.max(header.length + 5, 15);
+          });
+        }
         break;
 
       default:
