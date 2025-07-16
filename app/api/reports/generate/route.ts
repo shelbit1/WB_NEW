@@ -137,6 +137,199 @@ interface DetailReportItem {
   updated_at: string;
 }
 
+interface AcceptanceReportItem {
+  giCreateDate: string;      // Дата создания поставки
+  incomeId: number;          // Номер поставки
+  nmID: number;              // Артикул Wildberries
+  shkCreateDate: string;     // Дата приёмки
+  subjectName: string;       // Предмет (подкатегория)
+  count: number;             // Количество товаров, шт.
+  total: number;             // Суммарная стоимость приёмки, ₽
+}
+
+async function fetchAcceptanceReport(apiKey: string, dateFrom: string, dateTo: string): Promise<AcceptanceReportItem[]> {
+  // Детальное диагностическое логирование
+  const isProblematicPeriod = dateFrom.includes('2025-06-16') || dateFrom.includes('16.06.2025') || dateFrom.includes('2025-06-22');
+  
+  console.log('🔍 ДИАГНОСТИКА ПЛАТНОЙ ПРИЕМКИ:');
+  console.log(`   📅 Период: ${dateFrom} → ${dateTo}`);
+  console.log(`   🔑 Токен (первые 20 символов): ${apiKey.substring(0, 20)}...`);
+  console.log(`   ⚠️  Проблемный период (16-22 июня): ${isProblematicPeriod}`);
+  console.log(`   📊 Текущее время: ${new Date().toISOString()}`);
+  console.log(`   🌍 Локальное время: ${new Date().toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' })}`);
+  
+  try {
+    // Пробуем новый асинхронный API
+    console.log('🔄 ЭТАП 1: Попытка использования нового асинхронного API...');
+    
+    // 1. Создаем задачу (GET запрос с query параметрами)
+    const createUrl = `https://seller-analytics-api.wildberries.ru/api/v1/acceptance_report?dateFrom=${dateFrom}&dateTo=${dateTo}`;
+    console.log(`   🌐 URL создания задачи: ${createUrl}`);
+    
+    const createResponse = await fetch(createUrl, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    console.log(`   📡 Ответ создания задачи: ${createResponse.status} ${createResponse.statusText}`);
+    console.log(`   📋 Заголовки ответа:`, Object.fromEntries(createResponse.headers.entries()));
+    
+    if (!createResponse.ok) {
+      const errorText = await createResponse.text();
+      console.log(`   ❌ Полный ответ ошибки: ${errorText}`);
+      throw new Error(`Асинхронный API недоступен: ${createResponse.status} ${createResponse.statusText}. Ответ: ${errorText}`);
+    }
+
+    const createData = await createResponse.json();
+    console.log(`   📋 Полный ответ создания задачи:`, JSON.stringify(createData, null, 2));
+    
+    const taskId = createData.data?.taskId;
+    
+    if (!taskId) {
+      console.log(`   ❌ TaskId не найден в ответе. Структура ответа:`, createData);
+      throw new Error('Не получен taskId от API');
+    }
+    
+    console.log(`📋 ЭТАП 2: Создана задача платной приемки: ${taskId}`);
+
+    // 2. Ждем готовности (с таймаутом)
+    let status = 'processing';
+    let attempts = 0;
+    const maxAttempts = isProblematicPeriod ? 24 : 72; // Сокращаем таймаут для проблемного периода (2 минуты вместо 6)
+    
+    console.log(`⏰ Максимальное количество попыток: ${maxAttempts}`);
+
+    while (status !== 'done' && attempts < maxAttempts) {
+      await new Promise(resolve => setTimeout(resolve, 5000)); // ждем 5 сек (согласно лимитам API)
+      
+      const statusUrl = `https://seller-analytics-api.wildberries.ru/api/v1/acceptance_report/tasks/${taskId}/status`;
+      console.log(`   🔍 Проверка статуса (попытка ${attempts + 1}): ${statusUrl}`);
+      
+      const statusResponse = await fetch(statusUrl, { 
+        headers: { 'Authorization': `Bearer ${apiKey}` },
+        method: 'GET'
+      });
+
+      console.log(`   📡 Ответ статуса: ${statusResponse.status} ${statusResponse.statusText}`);
+
+      if (!statusResponse.ok) {
+        const statusErrorText = await statusResponse.text();
+        console.log(`   ❌ Ошибка проверки статуса: ${statusErrorText}`);
+        throw new Error(`Ошибка проверки статуса: ${statusResponse.status}. Ответ: ${statusErrorText}`);
+      }
+
+      const statusData = await statusResponse.json();
+      console.log(`   📊 Полный ответ статуса:`, JSON.stringify(statusData, null, 2));
+      
+      status = statusData.data?.status || 'unknown';
+      attempts++;
+
+      console.log(`⏳ Попытка ${attempts}: статус = ${status}`);
+      
+      if (status === 'done') {
+        break;
+      }
+      
+      if (status === 'error' || status === 'failed') {
+        console.log(`   ❌ Задача завершилась с ошибкой: ${status}`);
+        console.log(`   🔍 Детали ошибки в статусе:`, statusData);
+        throw new Error(`Задача завершилась с ошибкой: ${status}. Детали: ${JSON.stringify(statusData)}`);
+      }
+    }
+
+    if (status !== 'done') {
+      console.log(`   ⏰ Таймаут ожидания. Финальный статус: ${status}, попыток: ${attempts}`);
+      throw new Error(`Таймаут ожидания выполнения задачи. Последний статус: ${status}, попыток: ${attempts}`);
+    }
+
+    // 3. Загружаем готовые данные
+    console.log('📥 ЭТАП 3: Загрузка готовых данных...');
+    const downloadUrl = `https://seller-analytics-api.wildberries.ru/api/v1/acceptance_report/tasks/${taskId}/download`;
+    console.log(`   🌐 URL загрузки: ${downloadUrl}`);
+    
+    const downloadResponse = await fetch(downloadUrl, { 
+      headers: { 'Authorization': `Bearer ${apiKey}` },
+      method: 'GET'
+    });
+
+    console.log(`   📡 Ответ загрузки: ${downloadResponse.status} ${downloadResponse.statusText}`);
+
+    if (!downloadResponse.ok) {
+      const downloadErrorText = await downloadResponse.text();
+      console.log(`   ❌ Ошибка загрузки: ${downloadErrorText}`);
+      throw new Error(`Ошибка загрузки данных: ${downloadResponse.status}. Ответ: ${downloadErrorText}`);
+    }
+
+    const downloadData = await downloadResponse.json();
+    console.log(`   📊 Размер полученных данных: ${JSON.stringify(downloadData).length} символов`);
+    console.log(`   📋 Тип данных: ${typeof downloadData}, является массивом: ${Array.isArray(downloadData)}`);
+    
+    if (downloadData && Array.isArray(downloadData) && downloadData.length > 0) {
+      console.log(`   📄 Первая запись:`, JSON.stringify(downloadData[0], null, 2));
+    }
+    
+    if (!downloadData || !Array.isArray(downloadData)) {
+      console.log('⚠️ Новый API вернул пустые данные, данных за этот период нет');
+      return [];
+    }
+
+    console.log(`✅ УСПЕХ: Новый асинхронный API успешно вернул ${downloadData.length} записей`);
+    return downloadData;
+    
+  } catch (asyncError) {
+    console.log(`❌ ЭТАП 4: Ошибка нового асинхронного API: ${asyncError}`);
+    console.log(`   🔍 Детали ошибки:`, asyncError);
+    
+    // Fallback: пробуем старый синхронный API
+    try {
+      console.log('🔄 ЭТАП 5: Переключение на старый синхронный API...');
+      
+      const fallbackUrl = `https://seller-analytics-api.wildberries.ru/api/v1/analytics/acceptance-report?dateFrom=${dateFrom}&dateTo=${dateTo}`;
+      console.log(`   🌐 URL старого API: ${fallbackUrl}`);
+      
+      const fallbackResponse = await fetch(fallbackUrl, {
+        method: 'GET',
+        headers: {
+          'Authorization': apiKey, // Старый API может использовать токен без Bearer
+          'Content-Type': 'application/json'
+        }
+      });
+
+      console.log(`   📡 Ответ старого API: ${fallbackResponse.status} ${fallbackResponse.statusText}`);
+      console.log(`   📋 Заголовки ответа старого API:`, Object.fromEntries(fallbackResponse.headers.entries()));
+
+      if (!fallbackResponse.ok) {
+        const fallbackErrorText = await fallbackResponse.text();
+        console.log(`   ❌ Ошибка старого API: ${fallbackErrorText}`);
+        throw new Error(`Старый API тоже недоступен: ${fallbackResponse.status} ${fallbackResponse.statusText}. Ответ: ${fallbackErrorText}`);
+      }
+
+      const fallbackData = await fallbackResponse.json();
+      console.log(`   📊 Размер данных старого API: ${JSON.stringify(fallbackData).length} символов`);
+      console.log(`   📋 Тип данных: ${typeof fallbackData}, является массивом: ${Array.isArray(fallbackData)}`);
+      console.log(`   📄 Полный ответ старого API:`, JSON.stringify(fallbackData, null, 2));
+      
+      const processedData = fallbackData.report || fallbackData || [];
+      
+      if (!processedData || !Array.isArray(processedData)) {
+        console.log('⚠️ Старый API тоже вернул пустые данные');
+        return [];
+      }
+
+      console.log(`✅ УСПЕХ: Старый API успешно вернул ${processedData.length} записей`);
+      return processedData;
+
+    } catch (oldApiError) {
+      console.log(`❌ ФИНАЛ: И старый API тоже недоступен: ${oldApiError}`);
+      console.log(`   🔍 Детали ошибки старого API:`, oldApiError);
+      throw new Error(`Оба API недоступны. Новый: ${asyncError}. Старый: ${oldApiError}`);
+    }
+  }
+}
+
 async function fetchDetailReport(apiKey: string, dateFrom: string, dateTo: string): Promise<DetailReportItem[]> {
   const url = new URL('https://statistics-api.wildberries.ru/api/v5/supplier/reportDetailByPeriod');
   url.searchParams.append('dateFrom', dateFrom);
@@ -639,24 +832,120 @@ export async function POST(request: NextRequest) {
         break;
 
       case 'acceptance':
-        headers = ['Дата', 'Артикул', 'Количество', 'Стоимость приёмки'];
-        fileName = `Платная приемка - ${startDate}–${endDate}.xlsx`;
+        // Подключаемся к базе данных и получаем токен
+        await connectToDatabase();
         
-        worksheet.addRow(headers);
-        const acceptanceHeaderRow = worksheet.getRow(1);
-        acceptanceHeaderRow.font = { bold: true };
-        acceptanceHeaderRow.fill = {
-          type: 'pattern',
-          pattern: 'solid',
-          fgColor: { argb: 'FFE0E0E0' }
-        };
+        let acceptanceTokenDoc;
+        try {
+          acceptanceTokenDoc = await Token.findById(tokenId);
+        } catch {
+          return NextResponse.json({ error: 'Невалидный ID токена' }, { status: 400 });
+        }
         
-        headers.forEach((header, index) => {
-          const column = worksheet.getColumn(index + 1);
-          column.width = Math.max(header.length + 5, 15);
-        });
-        
-        worksheet.addRow(['01.01.2025', 'WB123456', '100', '250']);
+        if (!acceptanceTokenDoc) {
+          return NextResponse.json({ error: 'Токен не найден' }, { status: 404 });
+        }
+
+        console.log('🚀 Начало создания отчета "Платная приемка"...');
+        const acceptanceStartTime = Date.now();
+
+        try {
+          // Получаем данные о платной приемке
+          const acceptanceData = await fetchAcceptanceReport(acceptanceTokenDoc.apiKey, startDate, endDate);
+
+          console.log(`📊 Проверка данных для отчета "Платная приемка". Записей: ${acceptanceData.length}`);
+
+          fileName = `Платная приемка - ${startDate}–${endDate}.xlsx`;
+
+          if (acceptanceData && acceptanceData.length > 0) {
+            console.log("🚀 Создание отчета 'Платная приемка' с данными...");
+            
+            // Заголовки согласно требованиям
+            headers = [
+              'Дата создания поставки',
+              'Номер поставки',
+              'Артикул Wildberries',
+              'Дата приёмки',
+              'Предмет (подкатегория)',
+              'Количество товаров, шт.',
+              'Суммарная стоимость приёмки, ₽'
+            ];
+
+            // Добавляем заголовки
+            worksheet.addRow(headers);
+            const acceptanceHeaderRow = worksheet.getRow(1);
+            acceptanceHeaderRow.font = { bold: true };
+            acceptanceHeaderRow.fill = {
+              type: 'pattern',
+              pattern: 'solid',
+              fgColor: { argb: 'FFE0E0E0' }
+            };
+
+            // Настройка ширины колонок
+            const acceptanceColumnWidths = [
+              { wch: 20 }, // Дата создания поставки
+              { wch: 15 }, // Номер поставки
+              { wch: 20 }, // Артикул Wildberries
+              { wch: 20 }, // Дата приёмки
+              { wch: 30 }, // Предмет (подкатегория)
+              { wch: 20 }, // Количество товаров, шт.
+              { wch: 25 }  // Суммарная стоимость приёмки, ₽
+            ];
+            
+            headers.forEach((header, index) => {
+              const column = worksheet.getColumn(index + 1);
+              column.width = acceptanceColumnWidths[index]?.wch || Math.max(header.length + 5, 15);
+            });
+
+            // Добавляем данные
+            acceptanceData.forEach(item => {
+              worksheet.addRow([
+                item.giCreateDate ? new Date(item.giCreateDate).toLocaleDateString('ru-RU') : '',
+                item.incomeId || '',
+                item.nmID || '',
+                item.shkCreateDate ? new Date(item.shkCreateDate).toLocaleDateString('ru-RU') : '',
+                item.subjectName || '',
+                item.count || 0,
+                item.total || 0
+              ]);
+            });
+
+            console.log(`✅ Отчет "Платная приемка" создан за ${Date.now() - acceptanceStartTime}ms с ${acceptanceData.length} записями`);
+            
+          } else {
+            console.log("ℹ️ Нет данных для создания отчета 'Платная приемка' - создаем пустой шаблон");
+            
+            headers = [
+              'Дата создания поставки',
+              'Номер поставки',
+              'Артикул Wildberries',
+              'Дата приёмки',
+              'Предмет (подкатегория)',
+              'Количество товаров, шт.',
+              'Суммарная стоимость приёмки, ₽'
+            ];
+
+            // Добавляем заголовки для пустого шаблона
+            worksheet.addRow(headers);
+            const emptyHeaderRow = worksheet.getRow(1);
+            emptyHeaderRow.font = { bold: true };
+            emptyHeaderRow.fill = {
+              type: 'pattern',
+              pattern: 'solid',
+              fgColor: { argb: 'FFE0E0E0' }
+            };
+            
+            headers.forEach((header, index) => {
+              const column = worksheet.getColumn(index + 1);
+              column.width = Math.max(header.length + 5, 15);
+            });
+          }
+        } catch (error) {
+          console.error('❌ Ошибка при получении данных платной приемки:', error);
+          return NextResponse.json({ 
+            error: `Ошибка при получении данных платной приемки: ${error instanceof Error ? error.message : 'Неизвестная ошибка'}` 
+          }, { status: 500 });
+        }
         break;
 
       case 'products':
