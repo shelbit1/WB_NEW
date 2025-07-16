@@ -35,7 +35,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     }
 
     return NextResponse.json(token);
-  } catch (error) {
+  } catch {
     return NextResponse.json(
       { error: 'Ошибка при обновлении токена' },
       { status: 500 }
@@ -58,7 +58,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     }
 
     return NextResponse.json({ message: 'Токен удален' });
-  } catch (error) {
+  } catch {
     return NextResponse.json(
       { error: 'Ошибка при удалении токена' },
       { status: 500 }

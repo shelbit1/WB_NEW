@@ -21,6 +21,33 @@ export interface CampaignInfo {
   name: string;
 }
 
+// Интерфейсы для API ответов
+interface WildberriesAdvertData {
+  advertId: number;
+  name?: string;
+  type?: string;
+  status?: string;
+}
+
+interface WildberriesCampaignsResponse {
+  adverts?: WildberriesAdvertData[];
+}
+
+interface WildberriesFinanceRecord {
+  advertId: number;
+  updTime?: string;
+  updSum?: number;
+  paymentType?: string;
+  type?: string;
+  updNum?: string;
+}
+
+interface WildberriesCampaignDetails {
+  params?: Array<{
+    subjectId?: number;
+  }>;
+}
+
 // Функция добавления дней к дате
 export function addDays(date: Date, days: number): Date {
   const result = new Date(date);
@@ -51,11 +78,11 @@ export async function fetchCampaigns(apiKey: string): Promise<Campaign[]> {
       return [];
     }
 
-    const data = await response.json();
+    const data = await response.json() as WildberriesCampaignsResponse;
     console.log(`📦 Получено ${Array.isArray(data.adverts) ? data.adverts.length : 0} кампаний`);
     
     // Преобразуем данные в нужный формат
-    const campaigns: Campaign[] = (data.adverts || []).map((advert: any) => ({
+    const campaigns: Campaign[] = (data.adverts || []).map((advert: WildberriesAdvertData) => ({
       advertId: advert.advertId,
       name: advert.name || `Кампания ${advert.advertId}`,
       type: advert.type || 'Неизвестно',
@@ -92,7 +119,7 @@ export async function fetchSKUData(apiKey: string, campaigns: Campaign[]): Promi
           });
 
           if (response.ok) {
-            const data = await response.json();
+            const data = await response.json() as WildberriesCampaignDetails;
             // Получаем первый SKU из массива товаров кампании
             if (data.params && data.params.length > 0 && data.params[0].subjectId) {
               skuMap.set(campaign.advertId, data.params[0].subjectId.toString());
@@ -144,11 +171,11 @@ export async function fetchFinancialData(apiKey: string, startDate: string, endD
       return [];
     }
 
-    const data = await response.json();
+    const data = await response.json() as WildberriesFinanceRecord[];
     console.log(`📦 Получено ${Array.isArray(data) ? data.length : 0} финансовых записей`);
     
     // Преобразуем данные в нужный формат
-    const financialData: FinancialData[] = data.map((record: any) => ({
+    const financialData: FinancialData[] = data.map((record: WildberriesFinanceRecord) => ({
       advertId: record.advertId,
       date: record.updTime ? new Date(record.updTime).toISOString().split('T')[0] : '',
       sum: record.updSum || 0,

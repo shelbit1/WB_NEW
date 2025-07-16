@@ -160,7 +160,7 @@ async function fetchDetailReport(apiKey: string, dateFrom: string, dateTo: strin
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { reportType, clientName, startDate, endDate, tokenId } = body;
+    const { reportType, startDate, endDate, tokenId } = body;
 
     // Создаем новую рабочую книгу
     const workbook = new ExcelJS.Workbook();
@@ -545,7 +545,7 @@ export async function POST(request: NextRequest) {
         let financeTokenDoc;
         try {
           financeTokenDoc = await Token.findById(tokenId);
-        } catch (error) {
+        } catch {
           return NextResponse.json({ error: 'Невалидный ID токена' }, { status: 400 });
         }
         

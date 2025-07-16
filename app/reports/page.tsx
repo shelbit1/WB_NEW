@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, Download, Calendar } from 'lucide-react';
+import { ArrowLeft, Download } from 'lucide-react';
 
 interface Token {
   _id: string;
