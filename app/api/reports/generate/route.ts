@@ -660,24 +660,152 @@ export async function POST(request: NextRequest) {
         break;
 
       case 'products':
-        headers = ['Артикул', 'Наименование', 'Бренд', 'Категория', 'Цена'];
+        // Подключаемся к базе данных и получаем токен
+        await connectToDatabase();
+        
+        let productsTokenDoc;
+        try {
+          productsTokenDoc = await Token.findById(tokenId);
+        } catch {
+          return NextResponse.json({ error: 'Невалидный ID токена' }, { status: 400 });
+        }
+        
+        if (!productsTokenDoc) {
+          return NextResponse.json({ error: 'Токен не найден' }, { status: 404 });
+        }
+
+        console.log('🚀 Начало создания списка товаров...');
+        const productsStartTime = Date.now();
+
+                 // Получаем данные детализации для товаров из реализации
+         let realizationData: DetailReportItem[] = [];
+         try {
+           realizationData = await fetchDetailReport(productsTokenDoc.apiKey, startDate, endDate);
+           console.log(`📊 Получено записей реализации: ${realizationData.length}`);
+         } catch (error) {
+           console.warn('⚠️ Не удалось получить данные реализации:', error);
+         }
+
+                 // Импортируем функции для работы с товарами
+         const { getCostPriceData, transformCostPriceToExcel, loadSavedCostPrices } = await import('@/app/lib/product-utils');
+
+         // Получаем сохраненные себестоимости из базы данных
+         const savedCostPrices = await loadSavedCostPrices(tokenId);
+
+         // Получаем данные себестоимости с сохраненными ценами
+         const costPriceData = await getCostPriceData(productsTokenDoc.apiKey, savedCostPrices, realizationData);
+
         fileName = `Список товаров - ${startDate}–${endDate}.xlsx`;
-        
-        worksheet.addRow(headers);
-        const productsHeaderRow = worksheet.getRow(1);
-        productsHeaderRow.font = { bold: true };
-        productsHeaderRow.fill = {
-          type: 'pattern',
-          pattern: 'solid',
-          fgColor: { argb: 'FFE0E0E0' }
-        };
-        
-        headers.forEach((header, index) => {
-          const column = worksheet.getColumn(index + 1);
-          column.width = Math.max(header.length + 5, 15);
-        });
-        
-        worksheet.addRow(['WB123456', 'Пример товара', 'Бренд', 'Категория', '1000']);
+
+        if (costPriceData && costPriceData.length > 0) {
+          console.log("🚀 Создание списка товаров с данными...");
+          
+          // Преобразуем данные для Excel
+          const productsExcelData = transformCostPriceToExcel(costPriceData);
+
+          headers = [
+            'Артикул ВБ',
+            'Артикул продавца',
+            'Предмет',
+            'Бренд',
+            'Размер',
+            'Штрихкод',
+            'Цена',
+            'Себестоимость',
+            'Маржа',
+            'Рентабельность (%)',
+            'Источник данных',
+            'Дата создания',
+            'Дата обновления'
+          ];
+
+          // Добавляем заголовки
+          worksheet.addRow(headers);
+          const productsHeaderRow = worksheet.getRow(1);
+          productsHeaderRow.font = { bold: true };
+          productsHeaderRow.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FFE0E0E0' }
+          };
+
+          // Настройка ширины колонок для списка товаров
+          const productsColumnWidths = [
+            { wch: 15 }, // Артикул ВБ
+            { wch: 20 }, // Артикул продавца
+            { wch: 35 }, // Предмет
+            { wch: 15 }, // Бренд
+            { wch: 15 }, // Размер
+            { wch: 15 }, // Штрихкод
+            { wch: 15 }, // Цена
+            { wch: 15 }, // Себестоимость
+            { wch: 15 }, // Маржа
+            { wch: 20 }, // Рентабельность
+            { wch: 20 }, // Источник данных
+            { wch: 20 }, // Дата создания
+            { wch: 20 }, // Дата обновления
+          ];
+
+          headers.forEach((header, index) => {
+            const column = worksheet.getColumn(index + 1);
+            column.width = productsColumnWidths[index]?.wch || Math.max(header.length + 5, 15);
+          });
+
+          // Добавляем данные
+          productsExcelData.forEach(item => {
+            worksheet.addRow([
+              item["Артикул ВБ"],
+              item["Артикул продавца"],
+              item["Предмет"],
+              item["Бренд"],
+              item["Размер"],
+              item["Штрихкод"],
+              item["Цена"],
+              item["Себестоимость"],
+              item["Маржа"],
+              item["Рентабельность (%)"],
+              item["Источник данных"],
+              item["Дата создания"],
+              item["Дата обновления"]
+            ]);
+          });
+
+          console.log(`✅ Список товаров создан за ${Date.now() - productsStartTime}ms с ${productsExcelData.length} записями`);
+          
+        } else {
+          console.log("ℹ️ Нет данных для создания списка товаров - создаем пустой шаблон");
+          
+          headers = [
+            'Артикул ВБ',
+            'Артикул продавца',
+            'Предмет',
+            'Бренд',
+            'Размер',
+            'Штрихкод',
+            'Цена',
+            'Себестоимость',
+            'Маржа',
+            'Рентабельность (%)',
+            'Источник данных',
+            'Дата создания',
+            'Дата обновления'
+          ];
+
+          // Добавляем заголовки для пустого шаблона
+          worksheet.addRow(headers);
+          const emptyHeaderRow = worksheet.getRow(1);
+          emptyHeaderRow.font = { bold: true };
+          emptyHeaderRow.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FFE0E0E0' }
+          };
+          
+          headers.forEach((header, index) => {
+            const column = worksheet.getColumn(index + 1);
+            column.width = Math.max(header.length + 5, 15);
+          });
+        }
         break;
 
       case 'finances':
