@@ -4,138 +4,7 @@ import connectToDatabase from '@/app/lib/mongodb';
 import Token from '@/app/lib/models/Token';
 import { getStorageData, StorageItem } from '@/app/lib/storage-utils';
 
-interface DetailReportItem {
-  rrd_id: number;
-  realizationreport_id: number;
-  date_from: string;
-  date_to: string;
-  create_dt: string;
-  currency_name: string;
-  suppliercontract_code: string;
-  rr_dt: string;
-  gi_id: number;
-  subject_name: string;
-  nm_id: number;
-  brand_name: string;
-  sa_name: string;
-  ts_name: string;
-  barcode: string;
-  doc_type_name: string;
-  quantity: number;
-  retail_price: number;
-  retail_amount: number;
-  sale_percent: number;
-  commission_percent: number;
-  office_name: string;
-  supplier_oper_name: string;
-  order_dt: string;
-  sale_dt: string;
-  shk_id: number;
-  retail_price_withdisc_rub: number;
-  delivery_amount: number;
-  return_amount: number;
-  delivery_rub: number;
-  gi_box_type_name: string;
-  product_discount_for_report: number;
-  supplier_promo: number;
-  rid: number;
-  ppvz_spp_prc: number;
-  ppvz_kvw_prc_base: number;
-  ppvz_kvw_prc: number;
-  sup_rating_prc_up: number;
-  is_kgvp_v2: number;
-  ppvz_sales_commission: number;
-  ppvz_for_pay: number;
-  ppvz_reward: number;
-  acquiring_fee: number;
-  acquiring_bank: string;
-  ppvz_vw: number;
-  ppvz_vw_nds: number;
-  ppvz_office_id: number;
-  ppvz_office_name: string;
-  ppvz_supplier_id: number;
-  ppvz_supplier_name: string;
-  ppvz_inn: string;
-  declaration_number: string;
-  bonus_type_name: string;
-  sticker_id: string;
-  site_country: string;
-  penalty: number;
-  additional_payment: number;
-  srid: string;
-  
-  // Дополнительные поля из полного API ответа
-  dlv_prc: number;
-  fix_tariff_date: string;
-  retail_commission: number;
-  sale_commission: number;
-  gi_box_code: string;
-  gi_box_count: number;
-  product_discount: number;
-  product_discount_rub: number;
-  kiz: string;
-  spp: number;
-  finished_price: number;
-  price_with_disc: number;
-  nm_id_old: number;
-  bonus_percent: number;
-  wb_discount: number;
-  customer_reward: number;
-  marketplace: string;
-  inc_id: number;
-  order_id: number;
-  gi_sku_id: number;
-  country_name: string;
-  oblast_okrug_name: string;
-  region_name: string;
-  income_id: number;
-  odid: number;
-  spp_office: number;
-  for_pay_nds: number;
-  ppvz_inn_nds: number;
-  ppvz_office_address: string;
-  ppvz_office_name_full: string;
-  sticker_number: string;
-  gi_barcode: string;
-  gi_id_old: number;
-  posting_number: string;
-  imei: string;
-  box_type_name: string;
-  cluster_from: string;
-  cluster_to: string;
-  nm_id_supplier: string;
-  clusterization_charge: number;
-  clusterization_bonus: number;
-  consolidation_charge: number;
-  consolidated_goods_qty: number;
-  consolidated_coefficient: number;
-  consolidated_handling_fee: number;
-  consolidated_storage_fee: number;
-  payment_method: string;
-  payment_date: string;
-  bank_percent_fee: number;
-  insurance_premium: number;
-  insurance_discount: number;
-  return_shipping_charge: number;
-  return_not_selling_fee: number;
-  acceptance_charge: number;
-  placing_charge: number;
-  additional_charge: number;
-  storage_charge: number;
-  deduction_charge: number;
-  incorrect_attachments_charge: number;
-  redirection_charge: number;
-  shipping_charge: number;
-  fulfillment_charge: number;
-  acquiring_percent: number;
-  tax_rate: number;
-  vat_rate: number;
-  total_payment: number;
-  currency_code: string;
-  exchange_rate: number;
-  created_at: string;
-  updated_at: string;
-}
+
 
 interface AcceptanceReportItem {
   giCreateDate: string;      // Дата создания поставки
@@ -166,21 +35,50 @@ async function fetchAcceptanceReport(apiKey: string, dateFrom: string, dateTo: s
     const createUrl = `https://seller-analytics-api.wildberries.ru/api/v1/acceptance_report?dateFrom=${dateFrom}&dateTo=${dateTo}`;
     console.log(`   🌐 URL создания задачи: ${createUrl}`);
     
-    const createResponse = await fetch(createUrl, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json'
-      }
-    });
+    // Повторяем запрос создания задачи, если получаем 429 Too Many Requests
+    const maxCreateAttempts = 7; // Ограничиваем количество повторов
+    let createAttempt = 0;
+    let createResponse: any = null;
 
-    console.log(`   📡 Ответ создания задачи: ${createResponse.status} ${createResponse.statusText}`);
-    console.log(`   📋 Заголовки ответа:`, Object.fromEntries(createResponse.headers.entries()));
-    
-    if (!createResponse.ok) {
+    while (createAttempt < maxCreateAttempts) {
+      createAttempt++;
+      console.log(`   🚀 Попытка ${createAttempt}/${maxCreateAttempts} создать задачу платной приёмки`);
+
+      createResponse = await fetch(createUrl, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      console.log(`   📡 Ответ создания задачи: ${createResponse.status} ${createResponse.statusText}`);
+      console.log('   📋 Заголовки ответа:', Object.fromEntries(createResponse.headers.entries()));
+
+      // Успешный ответ – выходим из цикла
+      if (createResponse.ok) {
+        break;
+      }
+
+      // Ответ 429 – ждём и повторяем
+      if (createResponse.status === 429) {
+        const retryAfterHeader = createResponse.headers.get('Retry-After');
+        const retryAfterSeconds = retryAfterHeader ? parseInt(retryAfterHeader, 10) : 20; // По умолчанию 20 с
+        const waitMs = (retryAfterSeconds + 5) * 1000; // небольшой «джиттер» 5 с
+        console.log(`   ⏳ Получен 429. Ждём ${waitMs / 1000}s перед новой попыткой...`);
+        await new Promise(r => setTimeout(r, waitMs));
+        continue;
+      }
+
+      // Для остальных ошибок – завершаем
       const errorText = await createResponse.text();
       console.log(`   ❌ Полный ответ ошибки: ${errorText}`);
       throw new Error(`Асинхронный API недоступен: ${createResponse.status} ${createResponse.statusText}. Ответ: ${errorText}`);
+    }
+
+    if (!createResponse || !createResponse.ok) {
+      const errorText = createResponse ? await createResponse.text() : 'нет ответа';
+      throw new Error(`Асинхронный API недоступен после ${maxCreateAttempts} попыток. Ответ: ${errorText}`);
     }
 
     const createData = await createResponse.json();
@@ -330,26 +228,7 @@ async function fetchAcceptanceReport(apiKey: string, dateFrom: string, dateTo: s
   }
 }
 
-async function fetchDetailReport(apiKey: string, dateFrom: string, dateTo: string): Promise<DetailReportItem[]> {
-  const url = new URL('https://statistics-api.wildberries.ru/api/v5/supplier/reportDetailByPeriod');
-  url.searchParams.append('dateFrom', dateFrom);
-  url.searchParams.append('dateTo', dateTo);
-  url.searchParams.append('limit', '100000');
 
-  const response = await fetch(url.toString(), {
-    method: 'GET',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json'
-    }
-  });
-
-  if (!response.ok) {
-    throw new Error(`Ошибка API Wildberries: ${response.status} ${response.statusText}`);
-  }
-
-  return await response.json();
-}
 
 export async function POST(request: NextRequest) {
   try {
@@ -367,304 +246,191 @@ export async function POST(request: NextRequest) {
       case 'details':
         // Подключаемся к базе данных и получаем токен
         await connectToDatabase();
-        const tokenDoc = await Token.findById(tokenId);
         
-        if (!tokenDoc) {
+        let detailsTokenDoc;
+        try {
+          detailsTokenDoc = await Token.findById(tokenId);
+        } catch {
+          return NextResponse.json({ error: 'Невалидный ID токена' }, { status: 400 });
+        }
+        
+        if (!detailsTokenDoc) {
           return NextResponse.json({ error: 'Токен не найден' }, { status: 404 });
         }
 
-        // Получаем данные с API Wildberries
-        const detailData = await fetchDetailReport(tokenDoc.apiKey, startDate, endDate);
-
-        headers = [
-          'ID строки отчета',
-          'ID отчета реализации', 
-          'Дата начала',
-          'Дата окончания',
-          'Дата создания',
-          'Валюта',
-          'Код договора поставщика',
-          'Дата реализации',
-          'ID поставки',
-          'Предмет',
-          'Артикул WB',
-          'Бренд',
-          'Артикул поставщика',
-          'Размер',
-          'Штрихкод',
-          'Тип документа',
-          'Количество',
-          'Цена розничная',
-          'Сумма продаж',
-          'Скидка продавца %',
-          'Комиссия %',
-          'Склад',
-          'Тип операции',
-          'Дата заказа',
-          'Дата продажи',
-          'ШК',
-          'Цена розничная с учетом скидки',
-          'Сумма доставки',
-          'Сумма возврата',
-          'Стоимость логистики',
-          'Тип коробки',
-          'Скидка товара для отчета',
-          'Промо продавца',
-          'Номер поставки',
-          'СПП %',
-          'КВ без НДС %',
-          'КВ %',
-          'Доплата',
-          'КГВПв2',
-          'Комиссия продаж',
-          'К перечислению продавцу',
-          'Вознаграждение с продаж',
-          'Эквайринг',
-          'Банк эквайринга',
-          'Логистика',
-          'НДС с логистики',
-          'ID офиса',
-          'Название офиса',
-          'ID поставщика',
-          'Название поставщика',
-          'ИНН',
-          'Номер декларации',
-          'Тип бонуса',
-          'ID стикера',
-          'Страна',
-          'Штрафы',
-          'Доплаты',
-          'SRID',
-          
-          // Дополнительные поля
-          'Процент доставки',
-          'Дата фикс тарифа',
-          'Комиссия розничная',
-          'Комиссия продаж',
-          'Код коробки',
-          'Количество коробок',
-          'Скидка товара',
-          'Скидка товара руб',
-          'КИЗ',
-          'СПП',
-          'Финальная цена',
-          'Цена со скидкой',
-          'Старый артикул WB',
-          'Процент бонуса',
-          'Скидка WB',
-          'Вознаграждение покупателя',
-          'Маркетплейс',
-          'ID поступления',
-          'ID заказа',
-          'SKU ID',
-          'Страна',
-          'Область/округ',
-          'Регион',
-          'ID поступления',
-          'ODID',
-          'Офис СПП',
-          'К оплате НДС',
-          'ИНН НДС',
-          'Адрес офиса',
-          'Полное название офиса',
-          'Номер стикера',
-          'Штрихкод поставки',
-          'Старый ID поставки',
-          'Номер отправления',
-          'IMEI',
-          'Тип коробки',
-          'Кластер откуда',
-          'Кластер куда',
-          'Артикул поставщика',
-          'Плата за кластеризацию',
-          'Бонус кластеризации',
-          'Плата за консолидацию',
-          'Количество консолидированного товара',
-          'Коэффициент консолидации',
-          'Плата за обработку консолидации',
-          'Плата за хранение консолидации',
-          'Способ оплаты',
-          'Дата оплаты',
-          'Процент банка',
-          'Страховая премия',
-          'Страховая скидка',
-          'Плата за возвратную доставку',
-          'Плата за не продажу возврата',
-          'Плата за приемку',
-          'Плата за размещение',
-          'Дополнительная плата',
-          'Плата за хранение',
-          'Плата за удержание',
-          'Плата за неправильные вложения',
-          'Плата за перенаправление',
-          'Плата за доставку',
-          'Плата за фулфилмент',
-          'Процент эквайринга',
-          'Налоговая ставка',
-          'Ставка НДС',
-          'Общая оплата',
-          'Код валюты',
-          'Курс обмена',
-          'Дата создания',
-          'Дата обновления'
-        ];
+        console.log('🚀 Начало создания отчета детализации реализации...');
+        const detailsStartTime = Date.now();
 
         fileName = `Отчет детализации - ${startDate}–${endDate}.xlsx`;
 
-        // Добавляем заголовки
-        worksheet.addRow(headers);
+        try {
+          // Импортируем функции для работы с реализацией
+          const { fetchRealizationData, addDetailedRealizationToWorkbook } = await import('@/app/lib/realization-utils');
 
-        // Стилизуем заголовки
-        const headerRow = worksheet.getRow(1);
-        headerRow.font = { bold: true };
-        headerRow.fill = {
-          type: 'pattern',
-          pattern: 'solid',
-          fgColor: { argb: 'FFE0E0E0' }
-        };
+          // Получаем данные реализации
+          const realizationData = await fetchRealizationData(detailsTokenDoc.apiKey, startDate, endDate);
 
-        // Автоматически подгоняем ширину колонок
-        headers.forEach((header, index) => {
-          const column = worksheet.getColumn(index + 1);
-          column.width = Math.max(header.length / 2, 8);
-        });
+          console.log(`📊 Проверка данных для отчета детализации. Записей: ${realizationData.length}`);
 
-        // Добавляем данные
-        detailData.forEach(item => {
-          worksheet.addRow([
-            item.rrd_id || '',
-            item.realizationreport_id || '',
-            item.date_from || '',
-            item.date_to || '',
-            item.create_dt || '',
-            item.currency_name || '',
-            item.suppliercontract_code || '',
-            item.rr_dt ? new Date(item.rr_dt).toLocaleDateString('ru-RU') : '',
-            item.gi_id || '',
-            item.subject_name || '',
-            item.nm_id || '',
-            item.brand_name || '',
-            item.sa_name || '',
-            item.ts_name || '',
-            item.barcode || '',
-            item.doc_type_name || '',
-            item.quantity || 0,
-            item.retail_price || 0,
-            item.retail_amount || 0,
-            item.sale_percent || 0,
-            item.commission_percent || 0,
-            item.office_name || '',
-            item.supplier_oper_name || '',
-            item.order_dt ? new Date(item.order_dt).toLocaleDateString('ru-RU') : '',
-            item.sale_dt ? new Date(item.sale_dt).toLocaleDateString('ru-RU') : '',
-            item.shk_id || '',
-            item.retail_price_withdisc_rub || 0,
-            item.delivery_amount || 0,
-            item.return_amount || 0,
-            item.delivery_rub || 0,
-            item.gi_box_type_name || '',
-            item.product_discount_for_report || 0,
-            item.supplier_promo || 0,
-            item.rid || '',
-            item.ppvz_spp_prc || 0,
-            item.ppvz_kvw_prc_base || 0,
-            item.ppvz_kvw_prc || 0,
-            item.sup_rating_prc_up || 0,
-            item.is_kgvp_v2 || 0,
-            item.ppvz_sales_commission || 0,
-            item.ppvz_for_pay || 0,
-            item.ppvz_reward || 0,
-            item.acquiring_fee || 0,
-            item.acquiring_bank || '',
-            item.ppvz_vw || 0,
-            item.ppvz_vw_nds || 0,
-            item.ppvz_office_id || '',
-            item.ppvz_office_name || '',
-            item.ppvz_supplier_id || '',
-            item.ppvz_supplier_name || '',
-            item.ppvz_inn || '',
-            item.declaration_number || '',
-            item.bonus_type_name || '',
-            item.sticker_id || '',
-            item.site_country || '',
-            item.penalty || 0,
-            item.additional_payment || 0,
-            item.srid || '',
+          // Лист создается ТОЛЬКО при наличии данных реализации
+          console.log(`📊 Создание листа "Полный отчет". Количество записей: ${realizationData?.length || 0}`);
+
+          if (realizationData && realizationData.length > 0) {
+            console.log("🚀 Создание отчета детализации с данными...");
             
-            // Дополнительные поля
-            item.dlv_prc || 0,
-            item.fix_tariff_date || '',
-            item.retail_commission || 0,
-            item.sale_commission || 0,
-            item.gi_box_code || '',
-            item.gi_box_count || 0,
-            item.product_discount || 0,
-            item.product_discount_rub || 0,
-            item.kiz || '',
-            item.spp || 0,
-            item.finished_price || 0,
-            item.price_with_disc || 0,
-            item.nm_id_old || '',
-            item.bonus_percent || 0,
-            item.wb_discount || 0,
-            item.customer_reward || 0,
-            item.marketplace || '',
-            item.inc_id || '',
-            item.order_id || '',
-            item.gi_sku_id || '',
-            item.country_name || '',
-            item.oblast_okrug_name || '',
-            item.region_name || '',
-            item.income_id || '',
-            item.odid || '',
-            item.spp_office || 0,
-            item.for_pay_nds || 0,
-            item.ppvz_inn_nds || '',
-            item.ppvz_office_address || '',
-            item.ppvz_office_name_full || '',
-            item.sticker_number || '',
-            item.gi_barcode || '',
-            item.gi_id_old || '',
-            item.posting_number || '',
-            item.imei || '',
-            item.box_type_name || '',
-            item.cluster_from || '',
-            item.cluster_to || '',
-            item.nm_id_supplier || '',
-            item.clusterization_charge || 0,
-            item.clusterization_bonus || 0,
-            item.consolidation_charge || 0,
-            item.consolidated_goods_qty || 0,
-            item.consolidated_coefficient || 0,
-            item.consolidated_handling_fee || 0,
-            item.consolidated_storage_fee || 0,
-            item.payment_method || '',
-            item.payment_date || '',
-            item.bank_percent_fee || 0,
-            item.insurance_premium || 0,
-            item.insurance_discount || 0,
-            item.return_shipping_charge || 0,
-            item.return_not_selling_fee || 0,
-            item.acceptance_charge || 0,
-            item.placing_charge || 0,
-            item.additional_charge || 0,
-            item.storage_charge || 0,
-            item.deduction_charge || 0,
-            item.incorrect_attachments_charge || 0,
-            item.redirection_charge || 0,
-            item.shipping_charge || 0,
-            item.fulfillment_charge || 0,
-            item.acquiring_percent || 0,
-            item.tax_rate || 0,
-            item.vat_rate || 0,
-            item.total_payment || 0,
-            item.currency_code || '',
-            item.exchange_rate || 0,
-            item.created_at || '',
-            item.updated_at || ''
-          ]);
-        });
+            // Используем функцию для добавления детализированных данных в workbook
+            addDetailedRealizationToWorkbook(workbook, realizationData);
 
+            console.log(`✅ Отчет детализации создан за ${Date.now() - detailsStartTime}ms с ${realizationData.length} записями`);
+            
+          } else {
+            // Лист НЕ СОЗДАЕТСЯ, если data пустой!
+            console.log("⚠️ Лист 'Полный отчет' не создан - нет данных реализации");
+            console.log("ℹ️ Нет данных для создания отчета детализации - создаем пустой шаблон");
+            
+            // Создаем пустой шаблон если нет данных
+            headers = [
+              'ID строки отчета',
+              'ID отчета реализации', 
+              'Дата начала',
+              'Дата окончания',
+              'Дата создания',
+              'Валюта',
+              'Код договора поставщика',
+              'Дата реализации',
+              'ID поставки',
+              'Предмет',
+              'Артикул WB',
+              'Бренд',
+              'Артикул поставщика',
+              'Размер',
+              'Штрихкод',
+              'Тип документа',
+              'Количество',
+              'Цена розничная',
+              'Сумма продаж',
+              'Скидка продавца %',
+              'Комиссия %',
+              'Склад',
+              'Тип операции',
+              'Дата заказа',
+              'Дата продажи',
+              'ШК',
+              'Цена розничная с учетом скидки',
+              'Сумма доставки',
+              'Сумма возврата',
+              'Стоимость логистики',
+              'Тип коробки',
+              'Скидка товара для отчета',
+              'Промо продавца',
+              'Номер поставки',
+              'СПП %',
+              'КВ без НДС %',
+              'КВ %',
+              'Доплата',
+              'КГВПв2',
+              'Комиссия продаж',
+              'К перечислению продавцу',
+              'Вознаграждение с продаж',
+              'Эквайринг',
+              'Банк эквайринга',
+              'Логистика',
+              'НДС с логистики',
+              'ID офиса',
+              'Название офиса',
+              'ID поставщика',
+              'Название поставщика',
+              'ИНН',
+              'Номер декларации',
+              'Тип бонуса',
+              'ID стикера',
+              'Страна',
+              'Штрафы',
+              'Доплаты',
+              'SRID'
+            ];
+
+            // Добавляем заголовки для пустого шаблона
+            worksheet.addRow(headers);
+            const emptyHeaderRow = worksheet.getRow(1);
+            emptyHeaderRow.font = { bold: true };
+            emptyHeaderRow.fill = {
+              type: 'pattern',
+              pattern: 'solid',
+              fgColor: { argb: 'FFE0E0E0' }
+            };
+            
+            headers.forEach((header, index) => {
+              const column = worksheet.getColumn(index + 1);
+              column.width = Math.max(header.length / 2, 8);
+            });
+          }
+        } catch (error) {
+          console.error('❌ Ошибка при получении данных реализации:', error);
+          
+          // Проверяем тип ошибки для лучшей обработки
+          if (error instanceof Error && error.message.includes('API_ENDPOINT_NOT_FOUND')) {
+            console.log('🔧 Обнаружена проблема с endpoint API - возможно, API Wildberries изменился');
+            console.log('📞 Рекомендуется обратиться к документации Wildberries API или в техподдержку');
+            console.log('🔄 Создаем пустой шаблон отчета детализации');
+
+            // Создаем пустой шаблон при ошибке API
+            headers = [
+              'ID строки отчета',
+              'ID отчета реализации', 
+              'Дата начала',
+              'Дата окончания',
+              'Дата создания',
+              'Валюта',
+              'Код договора поставщика',
+              'Дата реализации',
+              'ID поставки',
+              'Предмет',
+              'Артикул WB',
+              'Бренд',
+              'Артикул поставщика',
+              'Размер',
+              'Штрихкод',
+              'Тип документа',
+              'Количество',
+              'Цена розничная',
+              'Сумма продаж',
+              'Скидка продавца %',
+              'Комиссия %',
+              'Склад',
+              'Тип операции',
+              'Дата заказа',
+              'Дата продажи',
+              'ШК',
+              'Цена розничная с учетом скидки',
+              'Сумма доставки',
+              'Сумма возврата',
+              'Стоимость логистики'
+            ];
+
+            // Добавляем заголовки для пустого шаблона
+            worksheet.addRow(headers);
+            const emptyHeaderRow = worksheet.getRow(1);
+            emptyHeaderRow.font = { bold: true };
+            emptyHeaderRow.fill = {
+              type: 'pattern',
+              pattern: 'solid',
+              fgColor: { argb: 'FFE0E0E0' }
+            };
+            
+            headers.forEach((header, index) => {
+              const column = worksheet.getColumn(index + 1);
+              column.width = Math.max(header.length / 2, 8);
+            });
+            
+            fileName = `Шаблон отчета детализации - ${startDate}–${endDate}.xlsx`;
+          } else {
+            console.error('💥 Критическая ошибка при создании отчета детализации');
+            return NextResponse.json({ 
+              error: `Ошибка при получении данных реализации: ${error instanceof Error ? error.message : 'Неизвестная ошибка'}` 
+            }, { status: 500 });
+          }
+        }
         break;
 
       case 'storage':
@@ -685,10 +451,16 @@ export async function POST(request: NextRequest) {
         console.log('🚀 Начало создания отчета "Платное хранение"...');
         const storageStartTime = Date.now();
 
-        // Получаем данные о платном хранении
-        const storageData = await getStorageData(storageTokenDoc.apiKey, startDate, endDate);
-
-        console.log(`📊 Проверка данных для отчета "Платное хранение". Записей: ${storageData.length}`);
+        let storageData: any[] = [];
+        try {
+          // Получаем данные о платном хранении
+          storageData = await getStorageData(storageTokenDoc.apiKey, startDate, endDate);
+          console.log(`📊 Проверка данных для отчета "Платное хранение". Записей: ${storageData.length}`);
+        } catch (error) {
+          console.error('❌ Ошибка при получении данных платного хранения:', error);
+          // Продолжаем создание пустого шаблона
+          storageData = [];
+        }
 
         fileName = `Платное хранение - ${startDate}–${endDate}.xlsx`;
 
@@ -789,6 +561,17 @@ export async function POST(request: NextRequest) {
               item["Дата фиксации тарифа"],
               item["Дата снижения тарифа"]
             ]);
+          });
+
+          // Форматируем числовые колонки БЕЗ разделителей тысяч (формат 0,00)
+          const storageNumericColumns = [9, 11, 12, 13, 14]; // Объем, Сумма хранения, Количество баркодов, Коэффициент склада, Скидка лояльности
+          storageNumericColumns.forEach(columnIndex => {
+            const column = worksheet.getColumn(columnIndex);
+            column.eachCell((cell, rowNumber) => {
+              if (rowNumber > 1) { // Пропускаем заголовок
+                cell.numFmt = '0,00'; // Формат БЕЗ разделителей тысяч согласно инструкциям
+              }
+            });
           });
 
           console.log(`✅ Отчет 'Платное хранение' создан с ${storageData.length} записями за ${Date.now() - storageStartTime}мс`);
@@ -910,6 +693,17 @@ export async function POST(request: NextRequest) {
               ]);
             });
 
+            // Форматируем числовые колонки для отчета платной приемки в российском формате
+            const acceptanceNumericColumns = [6, 7]; // Количество товаров, Суммарная стоимость приёмки
+            acceptanceNumericColumns.forEach(columnIndex => {
+              const column = worksheet.getColumn(columnIndex);
+              column.eachCell((cell, rowNumber) => {
+                if (rowNumber > 1) { // Пропускаем заголовок
+                  cell.numFmt = '[$-419]# ##0,00;[$-419]-# ##0,00'; // Российский формат с локалью
+                }
+              });
+            });
+
             console.log(`✅ Отчет "Платная приемка" создан за ${Date.now() - acceptanceStartTime}ms с ${acceptanceData.length} записями`);
             
           } else {
@@ -966,14 +760,9 @@ export async function POST(request: NextRequest) {
         console.log('🚀 Начало создания списка товаров...');
         const productsStartTime = Date.now();
 
-                 // Получаем данные детализации для товаров из реализации
-         let realizationData: DetailReportItem[] = [];
-         try {
-           realizationData = await fetchDetailReport(productsTokenDoc.apiKey, startDate, endDate);
-           console.log(`📊 Получено записей реализации: ${realizationData.length}`);
-         } catch (error) {
-           console.warn('⚠️ Не удалось получить данные реализации:', error);
-         }
+                 // Данные реализации больше не используются для товаров
+         const realizationData: any[] = [];
+         console.log('ℹ️ Данные реализации не загружаются для списка товаров');
 
                  // Импортируем функции для работы с товарами
          const { getCostPriceData, transformCostPriceToExcel, loadSavedCostPrices } = await import('@/app/lib/product-utils');
@@ -1057,6 +846,17 @@ export async function POST(request: NextRequest) {
               item["Дата создания"],
               item["Дата обновления"]
             ]);
+          });
+
+          // Форматируем числовые колонки для списка товаров в российском формате
+          const productsNumericColumns = [7, 8, 9, 10]; // Цена, Себестоимость, Маржа, Рентабельность
+          productsNumericColumns.forEach(columnIndex => {
+            const column = worksheet.getColumn(columnIndex);
+            column.eachCell((cell, rowNumber) => {
+              if (rowNumber > 1) { // Пропускаем заголовок
+                cell.numFmt = '[$-419]# ##0,00;[$-419]-# ##0,00'; // Российский формат с локалью
+              }
+            });
           });
 
           console.log(`✅ Список товаров создан за ${Date.now() - productsStartTime}ms с ${productsExcelData.length} записями`);
@@ -1206,6 +1006,17 @@ export async function POST(request: NextRequest) {
               item["Тип операции"],
               item["Номер документа"]
             ]);
+          });
+
+          // Форматируем числовые колонки для отчета финансов РК в российском формате
+          const financeNumericColumns = [5]; // Сумма
+          financeNumericColumns.forEach(columnIndex => {
+            const column = worksheet.getColumn(columnIndex);
+            column.eachCell((cell, rowNumber) => {
+              if (rowNumber > 1) { // Пропускаем заголовок
+                cell.numFmt = '[$-419]# ##0,00;[$-419]-# ##0,00'; // Российский формат с локалью
+              }
+            });
           });
 
           console.log(`✅ Лист "Финансы РК" создан за ${Date.now() - financeStartTime}ms с ${financeExcelData.length} записями`);
