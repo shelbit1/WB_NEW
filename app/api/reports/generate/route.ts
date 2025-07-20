@@ -913,7 +913,7 @@ export async function POST(request: NextRequest) {
         }
 
         // Импортируем функции для работы с финансами РК
-        const { fetchCampaigns, fetchSKUData, fetchFinancialData } = await import('@/app/lib/finance-utils');
+        const { fetchCampaigns, fetchSKUData, fetchCampaignArticles, fetchFinancialData } = await import('@/app/lib/finance-utils');
 
         console.log('🚀 Начало создания листа "Финансы РК"...');
         const financeStartTime = Date.now();
@@ -934,6 +934,11 @@ export async function POST(request: NextRequest) {
           const skuMap = await fetchSKUData(financeTokenDoc.apiKey, campaigns);
           console.log(`📊 Использование готовых SKU данных: ${skuMap.size} кампаний`);
           
+          // Получаем детальные данные артикулов для столбца I
+          console.log(`📊 Получение детальных данных артикулов для кампаний...`);
+          const articlesMap = await fetchCampaignArticles(financeTokenDoc.apiKey, campaigns);
+          console.log(`📊 Получено детальных данных артикулов: ${articlesMap.size} кампаний`);
+          
           // Создаем карту кампаний для быстрого поиска
           const campaignMap = new Map(campaigns.map(c => [c.advertId, c]));
           
@@ -948,7 +953,8 @@ export async function POST(request: NextRequest) {
               "Сумма": record.sum,
               "Источник списания": record.bill === 1 ? 'Счет' : 'Баланс',
               "Тип операции": record.type,
-              "Номер документа": record.docNumber
+              "Номер документа": record.docNumber,
+              "Артикулы WB": articlesMap.get(record.advertId) || 'Нет данных'
             };
           });
 
@@ -960,7 +966,8 @@ export async function POST(request: NextRequest) {
             'Сумма',
             'Источник списания',
             'Тип операции',
-            'Номер документа'
+            'Номер документа',
+            'Артикулы WB'
           ];
 
           fileName = `Финансы РК - ${startDate}–${endDate}.xlsx`;
@@ -987,6 +994,7 @@ export async function POST(request: NextRequest) {
             { wch: 20 }, // Источник списания
             { wch: 15 }, // Тип операции
             { wch: 20 }, // Номер документа
+            { wch: 40 }, // Артикулы WB (широкий столбец для списка артикулов)
           ];
           
           headers.forEach((header, index) => {
@@ -1004,7 +1012,8 @@ export async function POST(request: NextRequest) {
               item["Сумма"],
               item["Источник списания"],
               item["Тип операции"],
-              item["Номер документа"]
+              item["Номер документа"],
+              item["Артикулы WB"]
             ]);
           });
 
@@ -1032,7 +1041,8 @@ export async function POST(request: NextRequest) {
             'Сумма',
             'Источник списания',
             'Тип операции',
-            'Номер документа'
+            'Номер документа',
+            'Артикулы WB'
           ];
 
           fileName = `Финансы РК - ${startDate}–${endDate}.xlsx`;

@@ -45,8 +45,12 @@ interface WildberriesFinanceRecord {
 interface WildberriesCampaignDetails {
   params?: Array<{
     subjectId?: number;
+    nmId?: number;
+    menuId?: number;
   }>;
 }
+
+
 
 // Функция добавления дней к дате
 export function addDays(date: Date, days: number): Date {
@@ -94,6 +98,58 @@ export async function fetchCampaigns(apiKey: string): Promise<Campaign[]> {
   } catch (error) {
     console.error('❌ Ошибка при получении кампаний:', error);
     return [];
+  }
+}
+
+// Функция получения детальных данных по всем артикулам в кампаниях
+export async function fetchCampaignArticles(apiKey: string, campaigns: Campaign[]): Promise<Map<number, string>> {
+  const articlesMap = new Map<number, string>();
+  
+  try {
+    console.log(`📊 Получение детальных данных артикулов для ${campaigns.length} кампаний...`);
+    
+    // Получаем детальные данные для каждой кампании (пакетами для оптимизации)
+    const batchSize = 10;
+    for (let i = 0; i < campaigns.length; i += batchSize) {
+      const batch = campaigns.slice(i, i + batchSize);
+      const promises = batch.map(async (campaign) => {
+        try {
+          const response = await fetch(`https://advert-api.wildberries.ru/adv/v1/promotion/adverts/${campaign.advertId}`, {
+            method: 'GET',
+            headers: {
+              'Authorization': apiKey,
+              'Content-Type': 'application/json'
+            }
+          });
+
+          if (response.ok) {
+            const data = await response.json() as WildberriesCampaignDetails;
+            // Собираем все артикулы из кампании
+            if (data.params && data.params.length > 0) {
+              const articlesList = data.params
+                .filter(param => param.nmId && param.subjectId)
+                .map(param => `WB:${param.nmId} (SKU:${param.subjectId})`)
+                .join(', ');
+              
+              if (articlesList) {
+                articlesMap.set(campaign.advertId, articlesList);
+              }
+            }
+          }
+        } catch (error) {
+          console.warn(`Не удалось получить артикулы для кампании ${campaign.advertId}:`, error);
+        }
+      });
+      
+      await Promise.all(promises);
+      console.log(`📊 Обработано ${Math.min(i + batchSize, campaigns.length)} из ${campaigns.length} кампаний`);
+    }
+    
+    console.log(`✅ Получено данных артикулов для ${articlesMap.size} кампаний`);
+    return articlesMap;
+  } catch (error) {
+    console.error('❌ Ошибка при получении данных артикулов:', error);
+    return articlesMap;
   }
 }
 
