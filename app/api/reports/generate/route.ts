@@ -913,7 +913,7 @@ export async function POST(request: NextRequest) {
         }
 
         // Импортируем функции для работы с финансами РК
-        const { fetchCampaignArticles, fetchNmReportDetail, fetchFinancialData } = await import('@/app/lib/finance-utils');
+        const { fetchCampaignArticles, fetchFinancialData } = await import('@/app/lib/finance-utils');
 
         console.log('🚀 Начало создания листа "Финансы РК"...');
         const financeStartTime = Date.now();
@@ -1064,113 +1064,6 @@ export async function POST(request: NextRequest) {
             column.width = Math.max(header.length + 5, 15);
           });
         }
-
-        // ДОБАВЛЯЕМ НОВЫЙ ЛИСТ "лист2" для тестирования API nm-report/detail
-        if (financialData.length > 0) {
-          console.log('🚀 Создание тестового листа "лист2" с API nm-report/detail...');
-          const testStartTime = Date.now();
-          
-          // Создаем новый лист
-          const testWorksheet = workbook.addWorksheet('лист2');
-          
-          console.log(`📊 Тестирование API nm-report/detail для получения всех артикулов за период...`);
-          
-          // Получаем данные через новый API nm-report/detail
-          const nmReportMap = await fetchNmReportDetail(financeTokenDoc.apiKey, startDate, endDate);
-          console.log(`📊 Получено данных nm-report/detail: ${nmReportMap.size} артикулов`);
-          
-          // Создаем сводку всех артикулов из nm-report/detail
-          const allArticlesSummary = Array.from(nmReportMap.values()).slice(0, 5).join(' | ') + 
-            (nmReportMap.size > 5 ? ` | ...и еще ${nmReportMap.size - 5} артикулов` : '');
-          
-          // Подготавливаем данные для тестового листа
-          const testExcelData = financialData.map(record => {
-            return {
-              "ID кампании": record.advertId,
-              "Название кампании": record.campName || 'Неизвестная кампания',
-              "SKU ID": record.sku || 'Нет данных',
-              "Дата": record.date,
-              "Сумма": record.sum,
-              "Источник списания": record.bill === 1 ? 'Счет' : 'Баланс',
-              "Тип операции": record.type,
-              "Номер документа": record.docNumber,
-              "Артикулы WB (новый API)": nmReportMap.size > 0 ? 
-                `Всего артикулов за период: ${nmReportMap.size}. Примеры: ${allArticlesSummary}` : 
-                'Нет данных из nm-report/detail'
-            };
-          });
-
-          const testHeaders = [
-            'ID кампании',
-            'Название кампании', 
-            'SKU ID',
-            'Дата',
-            'Сумма',
-            'Источник списания',
-            'Тип операции',
-            'Номер документа',
-            'Артикулы WB (новый API)'
-          ];
-
-          // Добавляем заголовки
-          testWorksheet.addRow(testHeaders);
-
-          // Стилизуем заголовки
-          const testHeaderRow = testWorksheet.getRow(1);
-          testHeaderRow.font = { bold: true };
-          testHeaderRow.fill = {
-            type: 'pattern',
-            pattern: 'solid',
-            fgColor: { argb: 'FFAAFFAA' } // Зеленоватый цвет для отличия
-          };
-
-          // Настройка ширины колонок для тестового листа
-          const testColumnWidths = [
-            { wch: 15 }, // ID кампании
-            { wch: 30 }, // Название кампании
-            { wch: 15 }, // SKU ID
-            { wch: 15 }, // Дата
-            { wch: 15 }, // Сумма
-            { wch: 20 }, // Источник списания
-            { wch: 15 }, // Тип операции
-            { wch: 20 }, // Номер документа
-            { wch: 80 }, // Артикулы WB (новый API) - очень широкий столбец для детальной информации
-          ];
-          
-          testHeaders.forEach((header, index) => {
-            const column = testWorksheet.getColumn(index + 1);
-            column.width = testColumnWidths[index]?.wch || Math.max(header.length + 5, 15);
-          });
-
-          // Добавляем данные
-          testExcelData.forEach(item => {
-            testWorksheet.addRow([
-              item["ID кампании"],
-              item["Название кампании"],
-              item["SKU ID"],
-              item["Дата"],
-              item["Сумма"],
-              item["Источник списания"],
-              item["Тип операции"],
-              item["Номер документа"],
-              item["Артикулы WB (новый API)"]
-            ]);
-          });
-
-          // Форматируем числовые колонки
-          const testNumericColumns = [5]; // Сумма
-          testNumericColumns.forEach(columnIndex => {
-            const column = testWorksheet.getColumn(columnIndex);
-            column.eachCell((cell, rowNumber) => {
-              if (rowNumber > 1) { // Пропускаем заголовок
-                cell.numFmt = '[$-419]# ##0,00;[$-419]-# ##0,00'; // Российский формат с локалью
-              }
-            });
-          });
-
-          console.log(`✅ Тестовый лист "лист2" создан за ${Date.now() - testStartTime}ms с ${testExcelData.length} записями`);
-        }
-        
         break;
 
       default:
