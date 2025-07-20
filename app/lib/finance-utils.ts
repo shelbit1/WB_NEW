@@ -99,6 +99,126 @@ export async function fetchCampaigns(apiKey: string): Promise<Campaign[]> {
   }
 }
 
+// Интерфейсы для API fullstats
+interface FullStatsResponse {
+  views: number;
+  clicks: number;
+  sum: number;
+  dates: string[];
+  days: FullStatsDay[];
+  advertId: number;
+}
+
+interface FullStatsDay {
+  date: string;
+  views: number;
+  clicks: number;
+  sum: number;
+  apps: FullStatsApp[];
+}
+
+interface FullStatsApp {
+  views: number;
+  clicks: number;
+  sum: number;
+  nm: FullStatsNm[];
+  appType: number;
+}
+
+interface FullStatsNm {
+  views: number;
+  clicks: number;
+  sum: number;
+  name: string;
+  nmId: number;
+}
+
+// Новая функция получения детальной статистики с артикулами через API v2/fullstats
+export async function fetchCampaignFullStats(apiKey: string, campaigns: Campaign[], startDate: string, endDate: string): Promise<Map<number, string>> {
+  const articlesMap = new Map<number, string>();
+  
+  try {
+    console.log(`📊 Получение полной статистики с артикулами для ${campaigns.length} кампаний через API v2/fullstats...`);
+    
+    // Получаем статистику для каждой кампании (пакетами для оптимизации)
+    const batchSize = 3; // Уменьшаем размер пакета так как API может быть тяжелым
+    for (let i = 0; i < campaigns.length; i += batchSize) {
+      const batch = campaigns.slice(i, i + batchSize);
+      const promises = batch.map(async (campaign) => {
+        try {
+          console.log(`📈 Запрос статистики для кампании ${campaign.advertId}...`);
+          
+          const response = await fetch(`https://advert-api.wildberries.ru/adv/v2/fullstats?id=${campaign.advertId}&from=${startDate}&to=${endDate}`, {
+            method: 'GET',
+            headers: {
+              'Authorization': apiKey,
+              'Content-Type': 'application/json'
+            }
+          });
+
+          if (response.ok) {
+            const data: FullStatsResponse[] = await response.json();
+            console.log(`✅ Получена статистика для кампании ${campaign.advertId}:`, data.length > 0 ? 'есть данные' : 'нет данных');
+            
+            if (data && data.length > 0) {
+              const campaignStats = data[0]; // Берем первую запись
+              const allArticles = new Set<string>(); // Используем Set для уникальных артикулов
+              
+              // Собираем все nmId из всех дней и приложений
+              campaignStats.days?.forEach(day => {
+                day.apps?.forEach(app => {
+                  app.nm?.forEach(nm => {
+                    if (nm.nmId) {
+                      const articleInfo = nm.name ? `${nm.nmId}:${nm.name}` : `${nm.nmId}`;
+                      allArticles.add(articleInfo);
+                    }
+                  });
+                });
+              });
+              
+              if (allArticles.size > 0) {
+                const articlesList = Array.from(allArticles).join(', ');
+                articlesMap.set(campaign.advertId, articlesList);
+                console.log(`📦 Найдено ${allArticles.size} артикулов для кампании ${campaign.advertId}`);
+              } else {
+                articlesMap.set(campaign.advertId, `${campaign.name || 'Кампания'} ID:${campaign.advertId} (нет артикулов в статистике)`);
+              }
+            } else {
+              articlesMap.set(campaign.advertId, `${campaign.name || 'Кампания'} ID:${campaign.advertId} (нет данных в fullstats)`);
+            }
+          } else {
+            console.warn(`⚠️ API fullstats для кампании ${campaign.advertId} вернул ${response.status}`);
+            articlesMap.set(campaign.advertId, `${campaign.name || 'Кампания'} ID:${campaign.advertId} (API Error:${response.status})`);
+          }
+        } catch (error) {
+          console.error(`❌ Ошибка при получении fullstats для кампании ${campaign.advertId}:`, error);
+          articlesMap.set(campaign.advertId, `${campaign.name || 'Кампания'} ID:${campaign.advertId} (Ошибка запроса)`);
+        }
+      });
+      
+      await Promise.all(promises);
+      console.log(`📊 Обработано ${Math.min(i + batchSize, campaigns.length)} из ${campaigns.length} кампаний`);
+      
+      // Добавляем небольшую задержку между пакетами для соблюдения лимитов API
+      if (i + batchSize < campaigns.length) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    }
+    
+    console.log(`✅ Получена полная статистика для ${articlesMap.size} кампаний`);
+    return articlesMap;
+  } catch (error) {
+    console.error('❌ Ошибка при получении полной статистики:', error);
+    
+    // В случае полной ошибки создаем базовые записи
+    campaigns.forEach(campaign => {
+      articlesMap.set(campaign.advertId, `${campaign.name || 'Кампания'} ID:${campaign.advertId} (Ошибка API)`);
+    });
+    
+    return articlesMap;
+  }
+}
+
 // Функция получения баланса счета (новая)
 export async function fetchAccountBalance(apiKey: string): Promise<{balance: number, net: number, bonus: number} | null> {
   try {

@@ -913,7 +913,7 @@ export async function POST(request: NextRequest) {
         }
 
         // Импортируем функции для работы с финансами РК
-        const { fetchCampaignArticles, fetchFinancialData } = await import('@/app/lib/finance-utils');
+        const { fetchCampaignArticles, fetchCampaignFullStats, fetchFinancialData } = await import('@/app/lib/finance-utils');
 
         console.log('🚀 Начало создания листа "Финансы РК"...');
         const financeStartTime = Date.now();
@@ -1064,6 +1064,119 @@ export async function POST(request: NextRequest) {
             column.width = Math.max(header.length + 5, 15);
           });
         }
+
+        // ДОБАВЛЯЕМ НОВЫЙ ЛИСТ "лист2" для тестирования API v2/fullstats
+        if (financialData.length > 0) {
+          console.log('🚀 Создание тестового листа "лист2" с API v2/fullstats...');
+          const testStartTime = Date.now();
+          
+          // Создаем новый лист
+          const testWorksheet = workbook.addWorksheet('лист2');
+          
+          // Собираем уникальные кампании из финансовых данных
+          const uniqueCampaigns = new Map();
+          financialData.forEach(record => {
+            if (!uniqueCampaigns.has(record.advertId)) {
+              uniqueCampaigns.set(record.advertId, {
+                advertId: record.advertId,
+                name: record.campName || 'Неизвестная кампания'
+              });
+            }
+          });
+          
+          const campaignsArray = Array.from(uniqueCampaigns.values());
+          console.log(`📊 Тестирование API v2/fullstats для ${campaignsArray.length} кампаний...`);
+          
+          // Получаем данные через новый API v2/fullstats
+          const fullStatsMap = await fetchCampaignFullStats(financeTokenDoc.apiKey, campaignsArray, startDate, endDate);
+          console.log(`📊 Получено данных v2/fullstats: ${fullStatsMap.size} кампаний`);
+          
+          // Подготавливаем данные для тестового листа
+          const testExcelData = financialData.map(record => {
+            return {
+              "ID кампании": record.advertId,
+              "Название кампании": record.campName || 'Неизвестная кампания',
+              "SKU ID": record.sku || 'Нет данных',
+              "Дата": record.date,
+              "Сумма": record.sum,
+              "Источник списания": record.bill === 1 ? 'Счет' : 'Баланс',
+              "Тип операции": record.type,
+              "Номер документа": record.docNumber,
+              "Артикулы WB (новый API)": fullStatsMap.get(record.advertId) || 'Нет данных из fullstats'
+            };
+          });
+
+          const testHeaders = [
+            'ID кампании',
+            'Название кампании', 
+            'SKU ID',
+            'Дата',
+            'Сумма',
+            'Источник списания',
+            'Тип операции',
+            'Номер документа',
+            'Артикулы WB (новый API)'
+          ];
+
+          // Добавляем заголовки
+          testWorksheet.addRow(testHeaders);
+
+          // Стилизуем заголовки
+          const testHeaderRow = testWorksheet.getRow(1);
+          testHeaderRow.font = { bold: true };
+          testHeaderRow.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FFAAFFAA' } // Зеленоватый цвет для отличия
+          };
+
+          // Настройка ширины колонок для тестового листа
+          const testColumnWidths = [
+            { wch: 15 }, // ID кампании
+            { wch: 30 }, // Название кампании
+            { wch: 15 }, // SKU ID
+            { wch: 15 }, // Дата
+            { wch: 15 }, // Сумма
+            { wch: 20 }, // Источник списания
+            { wch: 15 }, // Тип операции
+            { wch: 20 }, // Номер документа
+            { wch: 50 }, // Артикулы WB (новый API) - широкий столбец
+          ];
+          
+          testHeaders.forEach((header, index) => {
+            const column = testWorksheet.getColumn(index + 1);
+            column.width = testColumnWidths[index]?.wch || Math.max(header.length + 5, 15);
+          });
+
+          // Добавляем данные
+          testExcelData.forEach(item => {
+            testWorksheet.addRow([
+              item["ID кампании"],
+              item["Название кампании"],
+              item["SKU ID"],
+              item["Дата"],
+              item["Сумма"],
+              item["Источник списания"],
+              item["Тип операции"],
+              item["Номер документа"],
+              item["Артикулы WB (новый API)"]
+            ]);
+          });
+
+          // Форматируем числовые колонки
+          const testNumericColumns = [5]; // Сумма
+          testNumericColumns.forEach(columnIndex => {
+            const column = testWorksheet.getColumn(columnIndex);
+            column.eachCell((cell, rowNumber) => {
+              if (rowNumber > 1) { // Пропускаем заголовок
+                cell.numFmt = '[$-419]# ##0,00;[$-419]-# ##0,00'; // Российский формат с локалью
+              }
+            });
+          });
+
+          console.log(`✅ Тестовый лист "лист2" создан за ${Date.now() - testStartTime}ms с ${testExcelData.length} записями`);
+        }
+        
         break;
 
       default:
