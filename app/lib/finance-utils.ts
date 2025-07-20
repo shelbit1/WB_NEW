@@ -133,7 +133,134 @@ interface FullStatsNm {
   nmId: number;
 }
 
-// Новая функция получения детальной статистики с артикулами через API v2/fullstats
+// Интерфейсы для API nm-report/detail
+interface NmReportRequest {
+  brandNames?: string[];
+  objectIDs?: number[];
+  tagIDs?: number[];
+  nmIDs?: number[];
+  timezone: string;
+  period: {
+    begin: string;
+    end: string;
+  };
+  orderBy: {
+    field: string;
+    mode: string;
+  };
+  page: number;
+}
+
+interface NmReportResponse {
+  data?: Array<{
+    nmID?: number;
+    vendorCode?: string;
+    brandName?: string;
+    name?: string;
+    ordersSumRub?: number;
+    ordersCount?: number;
+    [key: string]: unknown;
+  }>;
+  page?: number;
+  isNextPage?: boolean;
+}
+
+// Новая функция получения детальной аналитики артикулов через API nm-report/detail
+export async function fetchNmReportDetail(apiKey: string, startDate: string, endDate: string): Promise<Map<number, string>> {
+  const articlesMap = new Map<number, string>();
+  
+  try {
+    console.log(`📊 Получение детальной аналитики артикулов через API nm-report/detail...`);
+    
+    // Преобразуем даты в нужный формат для API
+    const beginDate = `${startDate} 00:00:00`;
+    const endDate_formatted = `${endDate} 23:59:59`;
+    
+    const requestBody: NmReportRequest = {
+      timezone: "Europe/Moscow",
+      period: {
+        begin: beginDate,
+        end: endDate_formatted
+      },
+      orderBy: {
+        field: "ordersSumRub",
+        mode: "desc"
+      },
+      page: 1
+    };
+    
+    console.log(`📈 Запрос аналитики артикулов за период ${beginDate} - ${endDate_formatted}...`);
+    
+    let currentPage = 1;
+    let hasMorePages = true;
+    let totalArticles = 0;
+    
+    // Получаем данные постранично
+    while (hasMorePages && currentPage <= 10) { // Ограничиваем 10 страницами для безопасности
+      try {
+        const pageRequestBody = { ...requestBody, page: currentPage };
+        
+        const response = await fetch('https://seller-analytics-api.wildberries.ru/api/v2/nm-report/detail', {
+          method: 'POST',
+          headers: {
+            'Authorization': apiKey,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(pageRequestBody)
+        });
+
+        if (response.ok) {
+          const data: NmReportResponse = await response.json();
+          console.log(`✅ Получена страница ${currentPage} аналитики артикулов:`, data.data?.length || 0, 'записей');
+          
+          if (data.data && data.data.length > 0) {
+            data.data.forEach(item => {
+              if (item.nmID) {
+                const articleInfo = [
+                  `nmID:${item.nmID}`,
+                  item.vendorCode ? `Артикул:${item.vendorCode}` : '',
+                  item.name ? `Название:${item.name}` : '',
+                  item.brandName ? `Бренд:${item.brandName}` : '',
+                  item.ordersSumRub ? `Продажи:${item.ordersSumRub}₽` : '',
+                  item.ordersCount ? `Заказы:${item.ordersCount}шт` : ''
+                ].filter(Boolean).join(' | ');
+                
+                // Используем nmID как ключ
+                articlesMap.set(item.nmID, articleInfo);
+                totalArticles++;
+              }
+            });
+            
+            // Проверяем есть ли еще страницы
+            hasMorePages = data.isNextPage === true;
+            currentPage++;
+          } else {
+            hasMorePages = false;
+          }
+        } else {
+          console.warn(`⚠️ API nm-report/detail страница ${currentPage} вернул ${response.status}`);
+          hasMorePages = false;
+        }
+      } catch (pageError) {
+        console.error(`❌ Ошибка при получении страницы ${currentPage}:`, pageError);
+        hasMorePages = false;
+      }
+      
+      // Добавляем небольшую задержку между запросами страниц
+      if (hasMorePages) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    }
+    
+    console.log(`✅ Получено ${totalArticles} артикулов из nm-report/detail за ${currentPage - 1} страниц`);
+    return articlesMap;
+  } catch (error) {
+    console.error('❌ Ошибка при получении nm-report/detail:', error);
+    return articlesMap;
+  }
+}
+
+// Функция получения детальной статистики с артикулами через API v2/fullstats (старая)
 export async function fetchCampaignFullStats(apiKey: string, campaigns: Campaign[], startDate: string, endDate: string): Promise<Map<number, string>> {
   const articlesMap = new Map<number, string>();
   

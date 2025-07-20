@@ -913,7 +913,7 @@ export async function POST(request: NextRequest) {
         }
 
         // Импортируем функции для работы с финансами РК
-        const { fetchCampaignArticles, fetchCampaignFullStats, fetchFinancialData } = await import('@/app/lib/finance-utils');
+        const { fetchCampaignArticles, fetchNmReportDetail, fetchFinancialData } = await import('@/app/lib/finance-utils');
 
         console.log('🚀 Начало создания листа "Финансы РК"...');
         const financeStartTime = Date.now();
@@ -1065,31 +1065,23 @@ export async function POST(request: NextRequest) {
           });
         }
 
-        // ДОБАВЛЯЕМ НОВЫЙ ЛИСТ "лист2" для тестирования API v2/fullstats
+        // ДОБАВЛЯЕМ НОВЫЙ ЛИСТ "лист2" для тестирования API nm-report/detail
         if (financialData.length > 0) {
-          console.log('🚀 Создание тестового листа "лист2" с API v2/fullstats...');
+          console.log('🚀 Создание тестового листа "лист2" с API nm-report/detail...');
           const testStartTime = Date.now();
           
           // Создаем новый лист
           const testWorksheet = workbook.addWorksheet('лист2');
           
-          // Собираем уникальные кампании из финансовых данных
-          const uniqueCampaigns = new Map();
-          financialData.forEach(record => {
-            if (!uniqueCampaigns.has(record.advertId)) {
-              uniqueCampaigns.set(record.advertId, {
-                advertId: record.advertId,
-                name: record.campName || 'Неизвестная кампания'
-              });
-            }
-          });
+          console.log(`📊 Тестирование API nm-report/detail для получения всех артикулов за период...`);
           
-          const campaignsArray = Array.from(uniqueCampaigns.values());
-          console.log(`📊 Тестирование API v2/fullstats для ${campaignsArray.length} кампаний...`);
+          // Получаем данные через новый API nm-report/detail
+          const nmReportMap = await fetchNmReportDetail(financeTokenDoc.apiKey, startDate, endDate);
+          console.log(`📊 Получено данных nm-report/detail: ${nmReportMap.size} артикулов`);
           
-          // Получаем данные через новый API v2/fullstats
-          const fullStatsMap = await fetchCampaignFullStats(financeTokenDoc.apiKey, campaignsArray, startDate, endDate);
-          console.log(`📊 Получено данных v2/fullstats: ${fullStatsMap.size} кампаний`);
+          // Создаем сводку всех артикулов из nm-report/detail
+          const allArticlesSummary = Array.from(nmReportMap.values()).slice(0, 5).join(' | ') + 
+            (nmReportMap.size > 5 ? ` | ...и еще ${nmReportMap.size - 5} артикулов` : '');
           
           // Подготавливаем данные для тестового листа
           const testExcelData = financialData.map(record => {
@@ -1102,7 +1094,9 @@ export async function POST(request: NextRequest) {
               "Источник списания": record.bill === 1 ? 'Счет' : 'Баланс',
               "Тип операции": record.type,
               "Номер документа": record.docNumber,
-              "Артикулы WB (новый API)": fullStatsMap.get(record.advertId) || 'Нет данных из fullstats'
+              "Артикулы WB (новый API)": nmReportMap.size > 0 ? 
+                `Всего артикулов за период: ${nmReportMap.size}. Примеры: ${allArticlesSummary}` : 
+                'Нет данных из nm-report/detail'
             };
           });
 
@@ -1140,7 +1134,7 @@ export async function POST(request: NextRequest) {
             { wch: 20 }, // Источник списания
             { wch: 15 }, // Тип операции
             { wch: 20 }, // Номер документа
-            { wch: 50 }, // Артикулы WB (новый API) - широкий столбец
+            { wch: 80 }, // Артикулы WB (новый API) - очень широкий столбец для детальной информации
           ];
           
           testHeaders.forEach((header, index) => {
