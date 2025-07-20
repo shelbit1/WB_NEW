@@ -7,6 +7,7 @@ export interface FinancialData {
   type: string;
   docNumber: string;
   sku?: string;
+  campName?: string;  // Название кампании из API
 }
 
 export interface Campaign {
@@ -40,6 +41,9 @@ interface WildberriesFinanceRecord {
   paymentType?: string;
   type?: string;
   updNum?: string;
+  campName?: string;      // Название кампании из API
+  advertType?: number;    // Тип рекламы из API  
+  advertStatus?: number;  // Статус кампании из API
 }
 
 interface WildberriesCampaignDetails {
@@ -101,6 +105,33 @@ export async function fetchCampaigns(apiKey: string): Promise<Campaign[]> {
   }
 }
 
+// Функция получения баланса счета (новая)
+export async function fetchAccountBalance(apiKey: string): Promise<{balance: number, net: number, bonus: number} | null> {
+  try {
+    console.log('💰 Получение баланса счета...');
+    
+    const response = await fetch('https://advert-api.wildberries.ru/adv/v1/balance', {
+      method: 'GET',
+      headers: {
+        'Authorization': apiKey,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      console.log(`✅ Баланс получен: счет ${data.balance}, баланс ${data.net}, бонусы ${data.bonus}`);
+      return data;
+    } else {
+      console.warn(`⚠️ Не удалось получить баланс: ${response.status}`);
+      return null;
+    }
+  } catch (error) {
+    console.error('❌ Ошибка при получении баланса:', error);
+    return null;
+  }
+}
+
 // Функция получения детальных данных по всем артикулам в кампаниях
 export async function fetchCampaignArticles(apiKey: string, campaigns: Campaign[]): Promise<Map<number, string>> {
   const articlesMap = new Map<number, string>();
@@ -128,13 +159,28 @@ export async function fetchCampaignArticles(apiKey: string, campaigns: Campaign[
             if (data.params && data.params.length > 0) {
               const articlesList = data.params
                 .filter(param => param.nmId && param.subjectId)
-                .map(param => `WB:${param.nmId} (SKU:${param.subjectId})`)
+                .map(param => {
+                  const nmId = param.nmId;
+                  const subjectId = param.subjectId;
+                  const menuId = param.menuId ? ` Menu:${param.menuId}` : '';
+                  return `${nmId}:${subjectId}${menuId}`;
+                })
                 .join(', ');
               
               if (articlesList) {
                 articlesMap.set(campaign.advertId, articlesList);
+              } else {
+                // Если нет артикулов с nmId и subjectId, ставим заглушку
+                articlesMap.set(campaign.advertId, `Кампания ID:${campaign.advertId}`);
               }
+            } else {
+              // Если нет params, ставим заглушку
+              articlesMap.set(campaign.advertId, `Кампания ID:${campaign.advertId}`);
             }
+          } else {
+            console.warn(`API /adv/v1/promotion/adverts/${campaign.advertId} returned ${response.status}`);
+            // При ошибке API ставим заглушку с информацией о кампании
+            articlesMap.set(campaign.advertId, `Кампания ID:${campaign.advertId} (API Error:${response.status})`);
           }
         } catch (error) {
           console.warn(`Не удалось получить артикулы для кампании ${campaign.advertId}:`, error);
@@ -237,7 +283,9 @@ export async function fetchFinancialData(apiKey: string, startDate: string, endD
       sum: record.updSum || 0,
       bill: record.paymentType === 'Счет' ? 1 : 0,
       type: record.type || 'Неизвестно',
-      docNumber: record.updNum || ''
+      docNumber: record.updNum || '',
+      sku: `Type:${record.advertType || 0} Status:${record.advertStatus || 0}`, // Добавляем тип и статус как SKU
+      campName: record.campName || 'Неизвестная кампания' // Добавляем название кампании
     }));
 
     console.log(`✅ Обработано ${financialData.length} финансовых записей`);

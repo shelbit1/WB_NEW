@@ -913,42 +913,44 @@ export async function POST(request: NextRequest) {
         }
 
         // Импортируем функции для работы с финансами РК
-        const { fetchCampaigns, fetchSKUData, fetchCampaignArticles, fetchFinancialData } = await import('@/app/lib/finance-utils');
+        const { fetchCampaignArticles, fetchFinancialData } = await import('@/app/lib/finance-utils');
 
         console.log('🚀 Начало создания листа "Финансы РК"...');
         const financeStartTime = Date.now();
 
-        // Получаем кампании
-        const campaigns = await fetchCampaigns(financeTokenDoc.apiKey);
-        
-        // Получаем финансовые данные с буферными днями
+        // Получаем финансовые данные с буферными днями (содержат названия кампаний)
         const financialData = await fetchFinancialData(financeTokenDoc.apiKey, startDate, endDate);
 
-        console.log(`📊 Проверка данных для листа "Финансы РК". Кампаний: ${campaigns.length}, финансовых записей: ${financialData.length}`);
+        console.log(`📊 Проверка данных для листа "Финансы РК". Финансовых записей: ${financialData.length}`);
 
-        if (campaigns.length > 0 && financialData.length > 0) {
+        if (financialData.length > 0) {
           console.log("🚀 Создание листа 'Финансы РК'...");
           
-          // Получаем SKU данные
-          console.log(`📊 Получение SKU данных для кампаний...`);
-          const skuMap = await fetchSKUData(financeTokenDoc.apiKey, campaigns);
-          console.log(`📊 Использование готовых SKU данных: ${skuMap.size} кампаний`);
+          // Собираем уникальные кампании из финансовых данных
+          const uniqueCampaigns = new Map();
+          financialData.forEach(record => {
+            if (!uniqueCampaigns.has(record.advertId)) {
+              uniqueCampaigns.set(record.advertId, {
+                advertId: record.advertId,
+                name: record.campName || 'Неизвестная кампания'
+              });
+            }
+          });
+          
+          console.log(`📊 Найдено уникальных кампаний: ${uniqueCampaigns.size}`);
           
           // Получаем детальные данные артикулов для столбца I
+          const campaignsArray = Array.from(uniqueCampaigns.values());
           console.log(`📊 Получение детальных данных артикулов для кампаний...`);
-          const articlesMap = await fetchCampaignArticles(financeTokenDoc.apiKey, campaigns);
+          const articlesMap = await fetchCampaignArticles(financeTokenDoc.apiKey, campaignsArray);
           console.log(`📊 Получено детальных данных артикулов: ${articlesMap.size} кампаний`);
-          
-          // Создаем карту кампаний для быстрого поиска
-          const campaignMap = new Map(campaigns.map(c => [c.advertId, c]));
           
           // Подготавливаем данные для листа "Финансы РК"
           const financeExcelData = financialData.map(record => {
-            const campaign = campaignMap.get(record.advertId);
             return {
               "ID кампании": record.advertId,
-              "Название кампании": campaign?.name || 'Неизвестная кампания',
-              "SKU ID": skuMap.get(record.advertId) || '',
+              "Название кампании": record.campName || 'Неизвестная кампания',
+              "SKU ID": record.sku || 'Нет данных',
               "Дата": record.date,
               "Сумма": record.sum,
               "Источник списания": record.bill === 1 ? 'Счет' : 'Баланс',
