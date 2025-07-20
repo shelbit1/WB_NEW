@@ -201,7 +201,7 @@ export async function fetchRealizationData(apiKey: string, dateFrom: string, dat
  * @param workbook - рабочая книга ExcelJS
  * @param data - данные реализации для добавления
  */
-export function addDetailedRealizationToWorkbook(workbook: any, data: RealizationDetailItem[]): void {
+export function addDetailedRealizationToWorkbook(workbook: import('exceljs').Workbook, data: RealizationDetailItem[]): void {
   console.log("📊 Создание листа 'Полный отчет' с разделением по realizationreport_id...");
   console.log(`📦 Входящие данные: ${data.length} записей`);
   
@@ -309,15 +309,15 @@ export function addDetailedRealizationToWorkbook(workbook: any, data: Realizatio
     // Добавляем все записи группы
     group.forEach(item => {
       // Вспомогательная функция получения числового значения
-      const num = (val: any) => {
+      const num = (val: unknown) => {
         if (val === undefined || val === null || val === '') return 0;
-        return typeof val === 'number' ? val : parseFloat(val.toString().replace(',', '.')) || 0;
+        return typeof val === 'number' ? val : parseFloat(val?.toString().replace(',', '.') || '0') || 0;
       };
 
       // Функция для удаления точек из строковых значений
-      const removeDots = (val: any) => {
+      const removeDots = (val: unknown) => {
         if (val === undefined || val === null || val === '') return "";
-        return val.toString().replace(/\./g, '');
+        return val?.toString().replace(/\./g, '') || '';
       };
 
       worksheet.addRow([
@@ -412,7 +412,7 @@ export function addDetailedRealizationToWorkbook(workbook: any, data: Realizatio
    const numericColumns = [9, 19, 20, 21, 22, 23, 30, 31, 32, 33, 35, 36, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 49, 50, 51, 58, 60, 61, 62, 64, 65, 66, 67, 70, 72, 74, 75];
    numericColumns.forEach(columnIndex => {
      const column = worksheet.getColumn(columnIndex);
-     column.eachCell((cell: any, rowNumber: number) => {
+     column.eachCell((cell: import('exceljs').Cell, rowNumber: number) => {
        if (rowNumber > 1) { // Пропускаем заголовок
          // Российский формат с точной спецификацией
          cell.numFmt = '[$-419]# ##0,00;[$-419]-# ##0,00';
@@ -421,9 +421,9 @@ export function addDetailedRealizationToWorkbook(workbook: any, data: Realizatio
    });
 
   // После того как все данные добавлены — обеспечиваем формат чисел (минимум 2 знака)
-  worksheet.eachRow({ includeEmpty: false }, (row: any, rowNumber: number) => {
+  worksheet.eachRow({ includeEmpty: false }, (row: import('exceljs').Row, rowNumber: number) => {
     if (rowNumber === 1) return; // пропускаем заголовок
-    row.eachCell((cell: any) => {
+    row.eachCell((cell: import('exceljs').Cell) => {
       if (typeof cell.value === 'number') {
         cell.numFmt = '[$-419]# ##0,00;[$-419]-# ##0,00';
       }

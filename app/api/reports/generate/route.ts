@@ -38,7 +38,7 @@ async function fetchAcceptanceReport(apiKey: string, dateFrom: string, dateTo: s
     // Повторяем запрос создания задачи, если получаем 429 Too Many Requests
     const maxCreateAttempts = 7; // Ограничиваем количество повторов
     let createAttempt = 0;
-    let createResponse: any = null;
+    let createResponse: Response | null = null;
 
     while (createAttempt < maxCreateAttempts) {
       createAttempt++;
@@ -451,7 +451,7 @@ export async function POST(request: NextRequest) {
         console.log('🚀 Начало создания отчета "Платное хранение"...');
         const storageStartTime = Date.now();
 
-        let storageData: any[] = [];
+        let storageData: StorageItem[] = [];
         try {
           // Получаем данные о платном хранении
           storageData = await getStorageData(storageTokenDoc.apiKey, startDate, endDate);
@@ -761,7 +761,7 @@ export async function POST(request: NextRequest) {
         const productsStartTime = Date.now();
 
                  // Данные реализации больше не используются для товаров
-         const realizationData: any[] = [];
+         const realizationData: import('@/app/lib/product-utils').RealizationItem[] = [];
          console.log('ℹ️ Данные реализации не загружаются для списка товаров');
 
                  // Импортируем функции для работы с товарами
