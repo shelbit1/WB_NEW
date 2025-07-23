@@ -851,132 +851,94 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ error: 'Токен не найден' }, { status: 404 });
         }
 
-        console.log('🚀 Начало создания отчета платной приемки...');
-        const acceptanceStartTime = Date.now();
-
-        fileName = `Платная приемка - ${startDate}–${endDate}.xlsx`;
+        console.log('�� Начало создания отчёта платной приёмки...');
+        const acceptanceStart = Date.now();
+        fileName = `Платная приёмка - ${startDate}–${endDate}.xlsx`;
 
         try {
-          // Получаем данные платной приемки
-          const acceptanceUrl = `https://marketplace-api.wildberries.ru/api/v3/acceptance-report?dateFrom=${startDate}&dateTo=${endDate}`;
-          const acceptanceResponse = await fetch(acceptanceUrl, {
+          // 1. Создаём задачу на генерацию
+          const createUrl = `https://seller-analytics-api.wildberries.ru/api/v1/acceptance_report?dateFrom=${startDate}&dateTo=${endDate}`;
+          const createResp = await fetch(createUrl, {
             method: 'GET',
-            headers: {
-              'Authorization': acceptanceTokenDoc.apiKey,
-              'Content-Type': 'application/json'
-            }
+            headers: { Authorization: acceptanceTokenDoc.apiKey }
           });
+          if (!createResp.ok) throw new Error(`Ошибка создания задачи: ${createResp.status}`);
+          const { data: { taskId } = { taskId: null } } = await createResp.json();
+          if (!taskId) throw new Error('taskId не получен');
+          console.log(`📋 Задача создана: ${taskId}`);
 
-          if (!acceptanceResponse.ok) {
-            if (acceptanceResponse.status === 401) {
-              throw new Error('Неверный или недействительный API токен');
+          // 2. Ожидаем готовности
+          let ready = false; let attempts = 0;
+          while (!ready && attempts < 30) {
+            attempts++;
+            const statusUrl = `https://seller-analytics-api.wildberries.ru/api/v1/acceptance_report/tasks/${taskId}/status`;
+            const st = await fetch(statusUrl, { headers: { Authorization: acceptanceTokenDoc.apiKey } });
+            if (st.ok) {
+              const stData = await st.json();
+              const status = stData.data?.status;
+              console.log(`🔄 Статус: ${status}`);
+              if (status === 'done') { ready = true; break; }
+              if (status === 'error') throw new Error('Ошибка генерации на стороне WB');
             }
-            throw new Error(`Ошибка API платной приемки: ${acceptanceResponse.status}`);
+            if (!ready) await new Promise(r => setTimeout(r, 5000));
           }
+          if (!ready) throw new Error('Превышено время ожидания отчёта');
 
-          const acceptanceData = await acceptanceResponse.json();
-          console.log(`📊 Получено записей платной приемки: ${acceptanceData.length || 0}`);
+          // 3. Скачиваем отчёт
+          const dlUrl = `https://seller-analytics-api.wildberries.ru/api/v1/acceptance_report/tasks/${taskId}/download`;
+          const dlResp = await fetch(dlUrl, { headers: { Authorization: acceptanceTokenDoc.apiKey } });
+          if (!dlResp.ok) throw new Error(`Ошибка скачивания: ${dlResp.status}`);
+          const accData = await dlResp.json();
+          console.log(`📦 Записей платной приёмки: ${accData.length}`);
 
-          if (acceptanceData && acceptanceData.length > 0) {
+          if (Array.isArray(accData) && accData.length) {
             headers = [
-              'Дата',
               'Кол-во',
-              'Стоимость за единицу (руб)',
-              'Общая стоимость (руб)',
+              'Дата создания GI',
+              'Income ID',
               'Артикул WB',
-              'Артикул поставщика',
+              'Дата создания ШК',
               'Предмет',
-              'Бренд',
-              'Размер'
+              'Сумма (руб)',
+              'Дата отчета'
             ];
-
-            // Добавляем заголовки
             worksheet.addRow(headers);
-            const headerRow = worksheet.getRow(1);
-            headerRow.font = { bold: true };
-            headerRow.fill = {
-              type: 'pattern',
-              pattern: 'solid',
-              fgColor: { argb: 'FFE0E0E0' }
-            };
+            const hr = worksheet.getRow(1);
+            hr.font = { bold: true };
+            hr.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE0E0E0' } };
 
-            // Добавляем данные
-            acceptanceData.forEach((item: {
-              date?: string;
-              count?: number;
-              unitPrice?: number;
-              totalPrice?: number;
-              nmId?: string;
-              vendorCode?: string;
-              subject?: string;
-              brand?: string;
-              size?: string;
-            }) => {
+            const periodStr = `${new Date(startDate).toLocaleDateString('ru-RU')} - ${new Date(endDate).toLocaleDateString('ru-RU')}`;
+
+            accData.forEach((item: { count?: number; giCreateDate?: string; incomeId?: number; nmID?: number; shkCreateDate?: string; subjectName?: string; total?: number; }) => {
               worksheet.addRow([
-                item.date ? new Date(item.date).toLocaleDateString('ru-RU') : '',
                 item.count || 0,
-                item.unitPrice || 0,
-                item.totalPrice || 0,
-                item.nmId || '',
-                item.vendorCode || '',
-                item.subject || '',
-                item.brand || '',
-                item.size || ''
+                item.giCreateDate ? new Date(item.giCreateDate).toLocaleDateString('ru-RU') : '',
+                item.incomeId || '',
+                item.nmID || '',
+                item.shkCreateDate ? new Date(item.shkCreateDate).toLocaleDateString('ru-RU') : '',
+                item.subjectName || '',
+                item.total || 0,
+                periodStr
               ]);
             });
 
-            // Форматируем числовые колонки в российском формате
-            const numericColumns = [2, 3, 4]; // Кол-во, Стоимость за единицу, Общая стоимость
-            numericColumns.forEach(columnIndex => {
-              const column = worksheet.getColumn(columnIndex);
-              column.eachCell((cell, rowNumber) => {
-                if (rowNumber > 1) {
-                  cell.numFmt = '[$-419]# ##0,00';
-                  cell.value = Number(cell.value) || 0;
-                }
-              });
+            // формат числовых столбцов
+            [1,7].forEach(col => {
+              const c = worksheet.getColumn(col);
+              c.eachCell((cell, row) => { if (row>1) { cell.numFmt='[$-419]# ##0,00'; cell.value=Number(cell.value)||0;} });
             });
 
-            // Настройка ширины колонок
-            headers.forEach((header, index) => {
-              const column = worksheet.getColumn(index + 1);
-              column.width = Math.max(header.length + 5, 15);
-            });
+            headers.forEach((h,i)=>{ worksheet.getColumn(i+1).width=Math.max(h.length+5,15); });
           } else {
-            // Пустой шаблон
-            headers = [
-              'Дата',
-              'Кол-во',
-              'Стоимость за единицу (руб)',
-              'Общая стоимость (руб)',
-              'Артикул WB',
-              'Артикул поставщика',
-              'Предмет',
-              'Бренд',
-              'Размер'
-            ];
-
+            headers = ['Кол-во','Дата создания GI','Income ID','Артикул WB','Дата создания ШК','Предмет','Сумма (руб)','Дата отчета'];
             worksheet.addRow(headers);
-            const emptyHeaderRow = worksheet.getRow(1);
-            emptyHeaderRow.font = { bold: true };
-            emptyHeaderRow.fill = {
-              type: 'pattern',
-              pattern: 'solid',
-              fgColor: { argb: 'FFE0E0E0' }
-            };
-
-            headers.forEach((header, index) => {
-              const column = worksheet.getColumn(index + 1);
-              column.width = Math.max(header.length + 5, 15);
-            });
+            worksheet.getCell('A1').font={bold:true};
           }
-
-          console.log(`✅ Отчет платной приемки создан за ${Date.now() - acceptanceStartTime}ms`);
-        } catch (error) {
-          console.error('❌ Ошибка при получении данных платной приемки:', error);
-          return NextResponse.json({ 
-            error: `Ошибка при получении данных платной приемки: ${error instanceof Error ? error.message : 'Неизвестная ошибка'}` 
-          }, { status: 500 });
+          console.log(`✅ Отчёт платной приёмки готов за ${Date.now()-acceptanceStart}ms`);
+        } catch(err: unknown) {
+          console.error('❌ Ошибка платной приёмки:', err);
+          const message = err instanceof Error ? err.message : 'неизвестно';
+          return NextResponse.json({ error: `Ошибка при получении данных платной приёмки: ${message}` }, { status: 500 });
         }
         break;
 
