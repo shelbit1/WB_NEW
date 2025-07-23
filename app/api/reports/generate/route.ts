@@ -2,231 +2,196 @@ import { NextRequest, NextResponse } from 'next/server';
 import ExcelJS from 'exceljs';
 import connectToDatabase from '@/app/lib/mongodb';
 import Token from '@/app/lib/models/Token';
-import { getStorageData, StorageItem } from '@/app/lib/storage-utils';
 
-
-
-interface AcceptanceReportItem {
-  giCreateDate: string;      // Дата создания поставки
-  incomeId: number;          // Номер поставки
-  nmID: number;              // Артикул Wildberries
-  shkCreateDate: string;     // Дата приёмки
-  subjectName: string;       // Предмет (подкатегория)
-  count: number;             // Количество товаров, шт.
-  total: number;             // Суммарная стоимость приёмки, ₽
+// Интерфейс для данных детализации реализации
+interface RealizationDetailItem {
+  realizationreport_id?: string;
+  date_from?: string;
+  date_to?: string;
+  create_dt?: string;
+  currency_name?: string;
+  suppliercontract_code?: string;
+  rrd_id?: string;
+  gi_id?: string;
+  subject_name?: string;
+  nm_id?: number;
+  brand_name?: string;
+  sa_name?: string;
+  ts_name?: string;
+  barcode?: string;
+  doc_type_name?: string;
+  quantity?: number;
+  retail_price?: number;
+  retail_amount?: number;
+  sale_percent?: number;
+  commission_percent?: number;
+  office_name?: string;
+  supplier_oper_name?: string;
+  order_dt?: string;
+  sale_dt?: string;
+  rr_dt?: string;
+  shk_id?: string;
+  retail_price_withdisc_rub?: number;
+  delivery_amount?: number;
+  return_amount?: number;
+  delivery_rub?: number;
+  gi_box_type_name?: string;
+  product_discount_for_report?: number;
+  supplier_promo?: number;
+  rid?: string;
+  ppvz_spp_prc?: number;
+  ppvz_kvw_prc_base?: number;
+  ppvz_kvw_prc?: number;
+  sup_rating_prc_up?: number;
+  is_kgvp_v2?: number;
+  ppvz_sales_commission?: number;
+  ppvz_for_pay?: number;
+  ppvz_reward?: number;
+  acquiring_fee?: number;
+  acquiring_percent?: number;
+  acquiring_bank?: string;
+  ppvz_vw?: number;
+  ppvz_vw_nds?: number;
+  ppvz_office_id?: string;
+  ppvz_office_name?: string;
+  ppvz_supplier_id?: string;
+  ppvz_supplier_name?: string;
+  ppvz_inn?: string;
+  declaration_number?: string;
+  bonus_type_name?: string;
+  sticker_id?: string;
+  site_country?: string;
+  penalty?: number;
+  additional_payment?: number;
+  rebill_logistic_cost?: number;
+  rebill_logistic_org?: string;
+  kiz?: string;
+  storage_fee?: number;
+  deduction?: number;
+  acceptance?: number;
+  srid?: string;
 }
 
-async function fetchAcceptanceReport(apiKey: string, dateFrom: string, dateTo: string): Promise<AcceptanceReportItem[]> {
-  // Детальное диагностическое логирование
-  const isProblematicPeriod = dateFrom.includes('2025-06-16') || dateFrom.includes('16.06.2025') || dateFrom.includes('2025-06-22');
+// Функция получения данных детализации реализации
+async function fetchRealizationDetailData(apiKey: string, dateFrom: string, dateTo: string): Promise<RealizationDetailItem[]> {
+  console.log(`📊 Начало получения данных детализации: ${dateFrom} - ${dateTo}`);
   
-  console.log('🔍 ДИАГНОСТИКА ПЛАТНОЙ ПРИЕМКИ:');
-  console.log(`   📅 Период: ${dateFrom} → ${dateTo}`);
-  console.log(`   🔑 Токен (первые 20 символов): ${apiKey.substring(0, 20)}...`);
-  console.log(`   ⚠️  Проблемный период (16-22 июня): ${isProblematicPeriod}`);
-  console.log(`   📊 Текущее время: ${new Date().toISOString()}`);
-  console.log(`   🌍 Локальное время: ${new Date().toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' })}`);
+  // Конвертируем даты в формат RFC3339
+  const startDate = new Date(dateFrom + 'T00:00:00Z').toISOString();
+  const endDate = new Date(dateTo + 'T23:59:59Z').toISOString();
   
-  try {
-    // Пробуем новый асинхронный API
-    console.log('🔄 ЭТАП 1: Попытка использования нового асинхронного API...');
+  console.log(`📅 Конвертированные даты: ${startDate} - ${endDate}`);
+  
+  const allData: RealizationDetailItem[] = [];
+  let rrd_id = 0;
+  let hasMoreData = true;
+  let attempts = 0;
+  const maxAttempts = 50; // Максимум 50 страниц для безопасности
+  
+  while (hasMoreData && attempts < maxAttempts) {
+    attempts++;
+    console.log(`📄 Запрос страницы ${attempts}, rrd_id: ${rrd_id}`);
     
-    // 1. Создаем задачу (GET запрос с query параметрами)
-    const createUrl = `https://seller-analytics-api.wildberries.ru/api/v1/acceptance_report?dateFrom=${dateFrom}&dateTo=${dateTo}`;
-    console.log(`   🌐 URL создания задачи: ${createUrl}`);
-    
-    // Повторяем запрос создания задачи, если получаем 429 Too Many Requests
-    const maxCreateAttempts = 7; // Ограничиваем количество повторов
-    let createAttempt = 0;
-    let createResponse: Response | null = null;
-
-    while (createAttempt < maxCreateAttempts) {
-      createAttempt++;
-      console.log(`   🚀 Попытка ${createAttempt}/${maxCreateAttempts} создать задачу платной приёмки`);
-
-      createResponse = await fetch(createUrl, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      console.log(`   📡 Ответ создания задачи: ${createResponse.status} ${createResponse.statusText}`);
-      console.log('   📋 Заголовки ответа:', Object.fromEntries(createResponse.headers.entries()));
-
-      // Успешный ответ – выходим из цикла
-      if (createResponse.ok) {
-        break;
-      }
-
-      // Ответ 429 – ждём и повторяем
-      if (createResponse.status === 429) {
-        const retryAfterHeader = createResponse.headers.get('Retry-After');
-        const retryAfterSeconds = retryAfterHeader ? parseInt(retryAfterHeader, 10) : 20; // По умолчанию 20 с
-        const waitMs = (retryAfterSeconds + 5) * 1000; // небольшой «джиттер» 5 с
-        console.log(`   ⏳ Получен 429. Ждём ${waitMs / 1000}s перед новой попыткой...`);
-        await new Promise(r => setTimeout(r, waitMs));
-        continue;
-      }
-
-      // Для остальных ошибок – завершаем
-      const errorText = await createResponse.text();
-      console.log(`   ❌ Полный ответ ошибки: ${errorText}`);
-      throw new Error(`Асинхронный API недоступен: ${createResponse.status} ${createResponse.statusText}. Ответ: ${errorText}`);
-    }
-
-    if (!createResponse || !createResponse.ok) {
-      const errorText = createResponse ? await createResponse.text() : 'нет ответа';
-      throw new Error(`Асинхронный API недоступен после ${maxCreateAttempts} попыток. Ответ: ${errorText}`);
-    }
-
-    const createData = await createResponse.json();
-    console.log(`   📋 Полный ответ создания задачи:`, JSON.stringify(createData, null, 2));
-    
-    const taskId = createData.data?.taskId;
-    
-    if (!taskId) {
-      console.log(`   ❌ TaskId не найден в ответе. Структура ответа:`, createData);
-      throw new Error('Не получен taskId от API');
-    }
-    
-    console.log(`📋 ЭТАП 2: Создана задача платной приемки: ${taskId}`);
-
-    // 2. Ждем готовности (с таймаутом)
-    let status = 'processing';
-    let attempts = 0;
-    const maxAttempts = isProblematicPeriod ? 24 : 72; // Сокращаем таймаут для проблемного периода (2 минуты вместо 6)
-    
-    console.log(`⏰ Максимальное количество попыток: ${maxAttempts}`);
-
-    while (status !== 'done' && attempts < maxAttempts) {
-      await new Promise(resolve => setTimeout(resolve, 5000)); // ждем 5 сек (согласно лимитам API)
-      
-      const statusUrl = `https://seller-analytics-api.wildberries.ru/api/v1/acceptance_report/tasks/${taskId}/status`;
-      console.log(`   🔍 Проверка статуса (попытка ${attempts + 1}): ${statusUrl}`);
-      
-      const statusResponse = await fetch(statusUrl, { 
-        headers: { 'Authorization': `Bearer ${apiKey}` },
-        method: 'GET'
-      });
-
-      console.log(`   📡 Ответ статуса: ${statusResponse.status} ${statusResponse.statusText}`);
-
-      if (!statusResponse.ok) {
-        const statusErrorText = await statusResponse.text();
-        console.log(`   ❌ Ошибка проверки статуса: ${statusErrorText}`);
-        throw new Error(`Ошибка проверки статуса: ${statusResponse.status}. Ответ: ${statusErrorText}`);
-      }
-
-      const statusData = await statusResponse.json();
-      console.log(`   📊 Полный ответ статуса:`, JSON.stringify(statusData, null, 2));
-      
-      status = statusData.data?.status || 'unknown';
-      attempts++;
-
-      console.log(`⏳ Попытка ${attempts}: статус = ${status}`);
-      
-      if (status === 'done') {
-        break;
-      }
-      
-      if (status === 'error' || status === 'failed') {
-        console.log(`   ❌ Задача завершилась с ошибкой: ${status}`);
-        console.log(`   🔍 Детали ошибки в статусе:`, statusData);
-        throw new Error(`Задача завершилась с ошибкой: ${status}. Детали: ${JSON.stringify(statusData)}`);
-      }
-    }
-
-    if (status !== 'done') {
-      console.log(`   ⏰ Таймаут ожидания. Финальный статус: ${status}, попыток: ${attempts}`);
-      throw new Error(`Таймаут ожидания выполнения задачи. Последний статус: ${status}, попыток: ${attempts}`);
-    }
-
-    // 3. Загружаем готовые данные
-    console.log('📥 ЭТАП 3: Загрузка готовых данных...');
-    const downloadUrl = `https://seller-analytics-api.wildberries.ru/api/v1/acceptance_report/tasks/${taskId}/download`;
-    console.log(`   🌐 URL загрузки: ${downloadUrl}`);
-    
-    const downloadResponse = await fetch(downloadUrl, { 
-      headers: { 'Authorization': `Bearer ${apiKey}` },
-      method: 'GET'
-    });
-
-    console.log(`   📡 Ответ загрузки: ${downloadResponse.status} ${downloadResponse.statusText}`);
-
-    if (!downloadResponse.ok) {
-      const downloadErrorText = await downloadResponse.text();
-      console.log(`   ❌ Ошибка загрузки: ${downloadErrorText}`);
-      throw new Error(`Ошибка загрузки данных: ${downloadResponse.status}. Ответ: ${downloadErrorText}`);
-    }
-
-    const downloadData = await downloadResponse.json();
-    console.log(`   📊 Размер полученных данных: ${JSON.stringify(downloadData).length} символов`);
-    console.log(`   📋 Тип данных: ${typeof downloadData}, является массивом: ${Array.isArray(downloadData)}`);
-    
-    if (downloadData && Array.isArray(downloadData) && downloadData.length > 0) {
-      console.log(`   📄 Первая запись:`, JSON.stringify(downloadData[0], null, 2));
-    }
-    
-    if (!downloadData || !Array.isArray(downloadData)) {
-      console.log('⚠️ Новый API вернул пустые данные, данных за этот период нет');
-      return [];
-    }
-
-    console.log(`✅ УСПЕХ: Новый асинхронный API успешно вернул ${downloadData.length} записей`);
-    return downloadData;
-    
-  } catch (asyncError) {
-    console.log(`❌ ЭТАП 4: Ошибка нового асинхронного API: ${asyncError}`);
-    console.log(`   🔍 Детали ошибки:`, asyncError);
-    
-    // Fallback: пробуем старый синхронный API
     try {
-      console.log('🔄 ЭТАП 5: Переключение на старый синхронный API...');
+      const url = `https://statistics-api.wildberries.ru/api/v5/supplier/reportDetailByPeriod?dateFrom=${startDate}&dateTo=${endDate}&limit=100000&rrd_id=${rrd_id}`;
+      console.log(`🌐 URL: ${url}`);
       
-      const fallbackUrl = `https://seller-analytics-api.wildberries.ru/api/v1/analytics/acceptance-report?dateFrom=${dateFrom}&dateTo=${dateTo}`;
-      console.log(`   🌐 URL старого API: ${fallbackUrl}`);
-      
-      const fallbackResponse = await fetch(fallbackUrl, {
+      const response = await fetch(url, {
         method: 'GET',
         headers: {
-          'Authorization': apiKey, // Старый API может использовать токен без Bearer
+          'Authorization': apiKey,
           'Content-Type': 'application/json'
         }
       });
 
-      console.log(`   📡 Ответ старого API: ${fallbackResponse.status} ${fallbackResponse.statusText}`);
-      console.log(`   📋 Заголовки ответа старого API:`, Object.fromEntries(fallbackResponse.headers.entries()));
+      console.log(`📡 Ответ API: ${response.status} ${response.statusText}`);
 
-      if (!fallbackResponse.ok) {
-        const fallbackErrorText = await fallbackResponse.text();
-        console.log(`   ❌ Ошибка старого API: ${fallbackErrorText}`);
-        throw new Error(`Старый API тоже недоступен: ${fallbackResponse.status} ${fallbackResponse.statusText}. Ответ: ${fallbackErrorText}`);
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`❌ Ошибка API детализации: ${response.status}`, errorText);
+        
+        if (response.status === 401) {
+          throw new Error('Неверный или недействительный API токен');
+        } else if (response.status === 429) {
+          console.log('⏳ Превышен лимит запросов, ждем 65 секунд...');
+          await new Promise(resolve => setTimeout(resolve, 65000));
+          continue; // Повторяем тот же запрос
+        } else if (response.status === 400) {
+          throw new Error('Некорректные параметры запроса. Проверьте период дат.');
+        }
+        throw new Error(`Ошибка API: ${response.status} ${response.statusText}`);
       }
 
-      const fallbackData = await fallbackResponse.json();
-      console.log(`   📊 Размер данных старого API: ${JSON.stringify(fallbackData).length} символов`);
-      console.log(`   📋 Тип данных: ${typeof fallbackData}, является массивом: ${Array.isArray(fallbackData)}`);
-      console.log(`   📄 Полный ответ старого API:`, JSON.stringify(fallbackData, null, 2));
+      const data = await response.json();
+      console.log(`📦 Получено записей: ${Array.isArray(data) ? data.length : 0}`);
       
-      const processedData = fallbackData.report || fallbackData || [];
-      
-      if (!processedData || !Array.isArray(processedData)) {
-        console.log('⚠️ Старый API тоже вернул пустые данные');
-        return [];
+      if (!Array.isArray(data) || data.length === 0) {
+        console.log('📄 Больше данных нет, завершаем');
+        hasMoreData = false;
+        break;
       }
 
-      console.log(`✅ УСПЕХ: Старый API успешно вернул ${processedData.length} записей`);
-      return processedData;
+      // Добавляем данные (фильтруем дубликаты если это не первая страница)
+      if (attempts === 1) {
+        // Первая страница - добавляем все данные
+        allData.push(...data);
+      } else {
+        // Последующие страницы - исключаем первую запись, так как она дублирует последнюю с предыдущей страницы
+        const filteredData = data.filter((item, index) => {
+          if (index === 0) {
+            // Проверяем, не дублируется ли первая запись
+            return !allData.some(existingItem => existingItem.rrd_id === item.rrd_id);
+          }
+          return true;
+        });
+        allData.push(...filteredData);
+        console.log(`📦 После фильтрации дубликатов добавлено: ${filteredData.length} записей`);
+      }
+      
+      // Получаем rrd_id для следующей страницы
+      const lastItem = data[data.length - 1];
+      const nextRrdId = lastItem?.rrd_id;
+      
+      if (nextRrdId && nextRrdId !== rrd_id) {
+        rrd_id = nextRrdId;
+        console.log(`➡️ Следующий rrd_id: ${rrd_id}`);
+      } else {
+        console.log('📄 Достигнут конец данных');
+        hasMoreData = false;
+      }
 
-    } catch (oldApiError) {
-      console.log(`❌ ФИНАЛ: И старый API тоже недоступен: ${oldApiError}`);
-      console.log(`   🔍 Детали ошибки старого API:`, oldApiError);
-      throw new Error(`Оба API недоступны. Новый: ${asyncError}. Старый: ${oldApiError}`);
+      // Пауза между запросами (1 запрос в минуту)
+      if (hasMoreData) {
+        console.log('⏳ Ожидание 65 секунд между запросами...');
+        await new Promise(resolve => setTimeout(resolve, 65000));
+      }
+
+    } catch (error) {
+      console.error(`❌ Ошибка на странице ${attempts}:`, error);
+      throw error;
     }
   }
+
+  console.log(`📊 Получено всего записей до дедупликации: ${allData.length}`);
+  
+  // Финальная дедупликация по rrd_id для полной гарантии
+  const uniqueData = allData.filter((item, index, array) => {
+    return array.findIndex(t => t.rrd_id === item.rrd_id) === index;
+  });
+  
+  const duplicatesCount = allData.length - uniqueData.length;
+  if (duplicatesCount > 0) {
+    console.log(`🔍 Удалено дубликатов: ${duplicatesCount}`);
+  }
+  
+  console.log(`✅ Завершено получение данных детализации: ${uniqueData.length} уникальных записей за ${attempts} запросов`);
+  return uniqueData;
 }
+
+
+
+
+
 
 
 
@@ -264,463 +229,271 @@ export async function POST(request: NextRequest) {
         fileName = `Отчет детализации - ${startDate}–${endDate}.xlsx`;
 
         try {
-          // Импортируем функции для работы с реализацией
-          const { fetchRealizationData, addDetailedRealizationToWorkbook } = await import('@/app/lib/realization-utils');
+          // Получаем данные детализации реализации
+          const realizationData = await fetchRealizationDetailData(detailsTokenDoc.apiKey, startDate, endDate);
 
-          // Получаем данные реализации
-          const realizationData = await fetchRealizationData(detailsTokenDoc.apiKey, startDate, endDate);
-
-          console.log(`📊 Проверка данных для отчета детализации. Записей: ${realizationData.length}`);
-
-          // Лист создается ТОЛЬКО при наличии данных реализации
-          console.log(`📊 Создание листа "Полный отчет". Количество записей: ${realizationData?.length || 0}`);
+          console.log(`📊 Получено записей детализации: ${realizationData.length}`);
 
           if (realizationData && realizationData.length > 0) {
             console.log("🚀 Создание отчета детализации с данными...");
             
-            // Используем функцию для добавления детализированных данных в workbook
-            addDetailedRealizationToWorkbook(workbook, realizationData);
-
-            console.log(`✅ Отчет детализации создан за ${Date.now() - detailsStartTime}ms с ${realizationData.length} записями`);
-            
-          } else {
-            // Лист НЕ СОЗДАЕТСЯ, если data пустой!
-            console.log("⚠️ Лист 'Полный отчет' не создан - нет данных реализации");
-            console.log("ℹ️ Нет данных для создания отчета детализации - создаем пустой шаблон");
-            
-            // Создаем пустой шаблон если нет данных
+                        // Заголовки согласно скриншоту
             headers = [
-              'ID строки отчета',
-              'ID отчета реализации', 
-              'Дата начала',
-              'Дата окончания',
-              'Дата создания',
-              'Валюта',
-              'Код договора поставщика',
-              'Дата реализации',
-              'ID поставки',
+              'Номер отчёта',
+              'Дата начала отчётного периода',
+              'Дата конца отчётного периода',
+              'Дата формирования отчёта',
+              'Валюта отчёта',
+              'Договор',
+              'Номер строки',
+              'Номер поставки',
               'Предмет',
               'Артикул WB',
               'Бренд',
-              'Артикул поставщика',
+              'Артикул продавца',
               'Размер',
-              'Штрихкод',
+              'Баркод',
               'Тип документа',
               'Количество',
               'Цена розничная',
-              'Сумма продаж',
-              'Скидка продавца %',
-              'Комиссия %',
+              'Сумма продаж (возвратов)',
+              'Согласованная скидка',
+              'Процент комиссии',
               'Склад',
-              'Тип операции',
+              'Обоснование для оплаты',
               'Дата заказа',
               'Дата продажи',
-              'ШК',
-              'Цена розничная с учетом скидки',
-              'Сумма доставки',
-              'Сумма возврата',
+              'Дата операции',
+              'Штрих-код',
+              'Цена розничная с учетом согласованной скидки',
+              'Количество доставок',
+              'Количество возвратов',
               'Стоимость логистики',
-              'Тип коробки',
-              'Скидка товара для отчета',
-              'Промо продавца',
-              'Номер поставки',
-              'СПП %',
-              'КВ без НДС %',
-              'КВ %',
-              'Доплата',
-              'КГВПв2',
-              'Комиссия продаж',
+              'Тип коробов',
+              'Согласованный продуктовый дисконт',
+              'Промокод',
+              'Уникальный идентификатор',
+              'Скидка постоянного покупателя',
+              'Размер кВВ без НДС, %',
+              'Итоговый кВВ без НДС, %',
+              'Размер снижения кВВ из-за рейтинга',
+              'Размер снижения кВВ из-за акции',
+              'Вознаграждение с продажи до вычета',
               'К перечислению продавцу',
-              'Вознаграждение с продаж',
-              'Эквайринг',
-              'Банк эквайринга',
-              'Логистика',
-              'НДС с логистики',
-              'ID офиса',
-              'Название офиса',
-              'ID поставщика',
-              'Название поставщика',
+              'Возмещение за выдачу и возврат',
+              'Возмещение издержек по эквайрингу',
+              'Наименование банка-эквайера',
+              'Вознаграждение WB без НДС',
+              'НДС с вознаграждения WB',
+              'Номер офиса',
+              'Наименование офиса доставки',
+              'Номер партнера',
+              'Партнер',
               'ИНН',
-              'Номер декларации',
-              'Тип бонуса',
-              'ID стикера',
-              'Страна',
+              'Номер таможенной декларации',
+              'Обоснование штрафов и доплат',
+              'Цифровое значение стикера, который клеится на товар',
+              'Страна продажи',
               'Штрафы',
               'Доплаты',
-              'SRID'
-            ];
-
-            // Добавляем заголовки для пустого шаблона
-            worksheet.addRow(headers);
-            const emptyHeaderRow = worksheet.getRow(1);
-            emptyHeaderRow.font = { bold: true };
-            emptyHeaderRow.fill = {
-              type: 'pattern',
-              pattern: 'solid',
-              fgColor: { argb: 'FFE0E0E0' }
-            };
-            
-            headers.forEach((header, index) => {
-              const column = worksheet.getColumn(index + 1);
-              column.width = Math.max(header.length / 2, 8);
-            });
-          }
-        } catch (error) {
-          console.error('❌ Ошибка при получении данных реализации:', error);
-          
-          // Проверяем тип ошибки для лучшей обработки
-          if (error instanceof Error && error.message.includes('API_ENDPOINT_NOT_FOUND')) {
-            console.log('🔧 Обнаружена проблема с endpoint API - возможно, API Wildberries изменился');
-            console.log('📞 Рекомендуется обратиться к документации Wildberries API или в техподдержку');
-            console.log('🔄 Создаем пустой шаблон отчета детализации');
-
-            // Создаем пустой шаблон при ошибке API
-            headers = [
-              'ID строки отчета',
-              'ID отчета реализации', 
-              'Дата начала',
-              'Дата окончания',
-              'Дата создания',
-              'Валюта',
-              'Код договора поставщика',
-              'Дата реализации',
-              'ID поставки',
-              'Предмет',
-              'Артикул WB',
-              'Бренд',
-              'Артикул поставщика',
-              'Размер',
-              'Штрихкод',
-              'Тип документа',
-              'Количество',
-              'Цена розничная',
-              'Сумма продаж',
-              'Скидка продавца %',
-              'Комиссия %',
-              'Склад',
-              'Тип операции',
-              'Дата заказа',
-              'Дата продажи',
-              'ШК',
-              'Цена розничная с учетом скидки',
-              'Сумма доставки',
-              'Сумма возврата',
-              'Стоимость логистики'
-            ];
-
-            // Добавляем заголовки для пустого шаблона
-            worksheet.addRow(headers);
-            const emptyHeaderRow = worksheet.getRow(1);
-            emptyHeaderRow.font = { bold: true };
-            emptyHeaderRow.fill = {
-              type: 'pattern',
-              pattern: 'solid',
-              fgColor: { argb: 'FFE0E0E0' }
-            };
-            
-            headers.forEach((header, index) => {
-              const column = worksheet.getColumn(index + 1);
-              column.width = Math.max(header.length / 2, 8);
-            });
-            
-            fileName = `Шаблон отчета детализации - ${startDate}–${endDate}.xlsx`;
-          } else {
-            console.error('💥 Критическая ошибка при создании отчета детализации');
-            return NextResponse.json({ 
-              error: `Ошибка при получении данных реализации: ${error instanceof Error ? error.message : 'Неизвестная ошибка'}` 
-            }, { status: 500 });
-          }
-        }
-        break;
-
-      case 'storage':
-        // Подключаемся к базе данных и получаем токен
-        await connectToDatabase();
-        
-        let storageTokenDoc;
-        try {
-          storageTokenDoc = await Token.findById(tokenId);
-        } catch {
-          return NextResponse.json({ error: 'Невалидный ID токена' }, { status: 400 });
-        }
-        
-        if (!storageTokenDoc) {
-          return NextResponse.json({ error: 'Токен не найден' }, { status: 404 });
-        }
-
-        console.log('🚀 Начало создания отчета "Платное хранение"...');
-        const storageStartTime = Date.now();
-
-        let storageData: StorageItem[] = [];
-        try {
-          // Получаем данные о платном хранении
-          storageData = await getStorageData(storageTokenDoc.apiKey, startDate, endDate);
-          console.log(`📊 Проверка данных для отчета "Платное хранение". Записей: ${storageData.length}`);
-        } catch (error) {
-          console.error('❌ Ошибка при получении данных платного хранения:', error);
-          // Продолжаем создание пустого шаблона
-          storageData = [];
-        }
-
-        fileName = `Платное хранение - ${startDate}–${endDate}.xlsx`;
-
-        if (storageData && storageData.length > 0) {
-          console.log("🚀 Создание отчета 'Платное хранение' с данными...");
-          
-          // Подготавливаем данные для Excel
-          const storageExcelData = storageData.map((item: StorageItem) => ({
-            "Дата": item.date || "",
-            "Склад": item.warehouse || "",
-            "Артикул Wildberries": item.nmId || "",
-            "Размер": item.size || "",
-            "Баркод": item.barcode || "",
-            "Предмет": item.subject || "",
-            "Бренд": item.brand || "",
-            "Артикул продавца": item.vendorCode || "",
-            "Объем (дм³)": item.volume || 0,
-            "Тип расчета": item.calcType || "",
-            "Сумма хранения": item.warehousePrice || 0,
-            "Количество баркодов": item.barcodesCount || 0,
-            "Коэффициент склада": item.warehouseCoef || 0,
-            "Скидка лояльности (%)": item.loyaltyDiscount || 0,
-            "Дата фиксации тарифа": item.tariffFixDate || "",
-            "Дата снижения тарифа": item.tariffLowerDate || "",
-          }));
-
-          headers = [
-            'Дата',
-            'Склад',
-            'Артикул Wildberries',
-            'Размер',
-            'Баркод',
-            'Предмет',
-            'Бренд',
-            'Артикул продавца',
-            'Объем (дм³)',
-            'Тип расчета',
-            'Сумма хранения',
-            'Количество баркодов',
-            'Коэффициент склада',
-            'Скидка лояльности (%)',
-            'Дата фиксации тарифа',
-            'Дата снижения тарифа'
-          ];
-
-          // Добавляем заголовки
-          worksheet.addRow(headers);
-          const storageHeaderRow = worksheet.getRow(1);
-          storageHeaderRow.font = { bold: true };
-          storageHeaderRow.fill = {
-            type: 'pattern',
-            pattern: 'solid',
-            fgColor: { argb: 'FFE0E0E0' }
-          };
-
-          // Настройка ширины колонок для оптимального отображения
-          const storageColumnWidths = [
-            { wch: 12 }, // Дата
-            { wch: 15 }, // Склад
-            { wch: 20 }, // Артикул Wildberries
-            { wch: 10 }, // Размер
-            { wch: 15 }, // Баркод
-            { wch: 25 }, // Предмет
-            { wch: 15 }, // Бренд
-            { wch: 15 }, // Артикул продавца
-            { wch: 12 }, // Объем
-            { wch: 20 }, // Тип расчета
-            { wch: 15 }, // Сумма хранения
-            { wch: 12 }, // Количество баркодов
-            { wch: 12 }, // Коэффициент склада
-            { wch: 15 }, // Скидка лояльности
-            { wch: 15 }, // Дата фиксации тарифа
-            { wch: 15 }, // Дата снижения тарифа
-          ];
-
-          storageColumnWidths.forEach((width, index) => {
-            const column = worksheet.getColumn(index + 1);
-            column.width = width.wch;
-          });
-
-          // Добавляем данные
-          storageExcelData.forEach(item => {
-            worksheet.addRow([
-              item["Дата"],
-              item["Склад"],
-              item["Артикул Wildberries"],
-              item["Размер"],
-              item["Баркод"],
-              item["Предмет"],
-              item["Бренд"],
-              item["Артикул продавца"],
-              item["Объем (дм³)"],
-              item["Тип расчета"],
-              item["Сумма хранения"],
-              item["Количество баркодов"],
-              item["Коэффициент склада"],
-              item["Скидка лояльности (%)"],
-              item["Дата фиксации тарифа"],
-              item["Дата снижения тарифа"]
-            ]);
-          });
-
-          // Форматируем числовые колонки БЕЗ разделителей тысяч (формат 0,00)
-          const storageNumericColumns = [9, 11, 12, 13, 14]; // Объем, Сумма хранения, Количество баркодов, Коэффициент склада, Скидка лояльности
-          storageNumericColumns.forEach(columnIndex => {
-            const column = worksheet.getColumn(columnIndex);
-            column.eachCell((cell, rowNumber) => {
-              if (rowNumber > 1) { // Пропускаем заголовок
-                cell.numFmt = '0,00'; // Формат БЕЗ разделителей тысяч согласно инструкциям
-              }
-            });
-          });
-
-          console.log(`✅ Отчет 'Платное хранение' создан с ${storageData.length} записями за ${Date.now() - storageStartTime}мс`);
-        } else {
-          console.log("ℹ️ Нет данных для создания отчета 'Платное хранение' - создаем пустой шаблон");
-          
-          headers = [
-            'Дата',
-            'Склад',
-            'Артикул Wildberries',
-            'Размер',
-            'Баркод',
-            'Предмет',
-            'Бренд',
-            'Артикул продавца',
-            'Объем (дм³)',
-            'Тип расчета',
-            'Сумма хранения',
-            'Количество баркодов',
-            'Коэффициент склада',
-            'Скидка лояльности (%)',
-            'Дата фиксации тарифа',
-            'Дата снижения тарифа'
-          ];
-
-          // Добавляем заголовки для пустого шаблона
-          worksheet.addRow(headers);
-          const emptyHeaderRow = worksheet.getRow(1);
-          emptyHeaderRow.font = { bold: true };
-          emptyHeaderRow.fill = {
-            type: 'pattern',
-            pattern: 'solid',
-            fgColor: { argb: 'FFE0E0E0' }
-          };
-          
-          headers.forEach((header, index) => {
-            const column = worksheet.getColumn(index + 1);
-            column.width = Math.max(header.length + 5, 15);
-          });
-        }
-        break;
-
-      case 'acceptance':
-        // Подключаемся к базе данных и получаем токен
-        await connectToDatabase();
-        
-        let acceptanceTokenDoc;
-        try {
-          acceptanceTokenDoc = await Token.findById(tokenId);
-        } catch {
-          return NextResponse.json({ error: 'Невалидный ID токена' }, { status: 400 });
-        }
-        
-        if (!acceptanceTokenDoc) {
-          return NextResponse.json({ error: 'Токен не найден' }, { status: 404 });
-        }
-
-        console.log('🚀 Начало создания отчета "Платная приемка"...');
-        const acceptanceStartTime = Date.now();
-
-        try {
-          // Получаем данные о платной приемке
-          const acceptanceData = await fetchAcceptanceReport(acceptanceTokenDoc.apiKey, startDate, endDate);
-
-          console.log(`📊 Проверка данных для отчета "Платная приемка". Записей: ${acceptanceData.length}`);
-
-          fileName = `Платная приемка - ${startDate}–${endDate}.xlsx`;
-
-          if (acceptanceData && acceptanceData.length > 0) {
-            console.log("🚀 Создание отчета 'Платная приемка' с данными...");
-            
-            // Заголовки согласно требованиям
-            headers = [
-              'Дата создания поставки',
-              'Номер поставки',
-              'Артикул Wildberries',
-              'Дата приёмки',
-              'Предмет (подкатегория)',
-              'Количество товаров, шт.',
-              'Суммарная стоимость приёмки, ₽'
+              'Возмещение издержек по',
+              'Организатор перевозки',
+              'Код маркировки',
+              'Стоимость хранения',
+              'Прочие удержания/выплаты',
+              'Стоимость платной приёмки',
+              'Уникальный идентификатор автора'
             ];
 
             // Добавляем заголовки
             worksheet.addRow(headers);
-            const acceptanceHeaderRow = worksheet.getRow(1);
-            acceptanceHeaderRow.font = { bold: true };
-            acceptanceHeaderRow.fill = {
+            const headerRow = worksheet.getRow(1);
+            headerRow.font = { bold: true };
+            headerRow.fill = {
               type: 'pattern',
               pattern: 'solid',
               fgColor: { argb: 'FFE0E0E0' }
             };
-
-            // Настройка ширины колонок
-            const acceptanceColumnWidths = [
-              { wch: 20 }, // Дата создания поставки
-              { wch: 15 }, // Номер поставки
-              { wch: 20 }, // Артикул Wildberries
-              { wch: 20 }, // Дата приёмки
-              { wch: 30 }, // Предмет (подкатегория)
-              { wch: 20 }, // Количество товаров, шт.
-              { wch: 25 }  // Суммарная стоимость приёмки, ₽
-            ];
             
+            // Настройка ширины колонок
             headers.forEach((header, index) => {
               const column = worksheet.getColumn(index + 1);
-              column.width = acceptanceColumnWidths[index]?.wch || Math.max(header.length + 5, 15);
-            });
+              column.width = Math.max(header.length + 2, 12);
+          });
 
-            // Добавляем данные
-            acceptanceData.forEach(item => {
-              worksheet.addRow([
-                item.giCreateDate ? new Date(item.giCreateDate).toLocaleDateString('ru-RU') : '',
-                item.incomeId || '',
-                item.nmID || '',
-                item.shkCreateDate ? new Date(item.shkCreateDate).toLocaleDateString('ru-RU') : '',
-                item.subjectName || '',
-                item.count || 0,
-                item.total || 0
-              ]);
-            });
+          // Добавляем данные
+            realizationData.forEach(item => {
+            worksheet.addRow([
+                item.realizationreport_id || '',
+                item.date_from ? new Date(item.date_from).toLocaleDateString('ru-RU') : '',
+                item.date_to ? new Date(item.date_to).toLocaleDateString('ru-RU') : '',
+                item.create_dt ? new Date(item.create_dt).toLocaleDateString('ru-RU') : '',
+                item.currency_name || '',
+                item.suppliercontract_code || '',
+                item.rrd_id || '',
+                item.gi_id || '',
+                item.subject_name || '',
+                item.nm_id || '',
+                item.brand_name || '',
+                item.sa_name || '',
+                item.ts_name || '',
+                item.barcode || '',
+                item.doc_type_name || '',
+                item.quantity || 0,
+                item.retail_price || 0,
+                item.retail_amount || 0,
+                item.sale_percent || 0,
+                item.commission_percent || 0,
+                item.office_name || '',
+                item.supplier_oper_name || '',
+                item.order_dt ? new Date(item.order_dt).toLocaleDateString('ru-RU') : '',
+                item.sale_dt ? new Date(item.sale_dt).toLocaleDateString('ru-RU') : '',
+                item.rr_dt ? new Date(item.rr_dt).toLocaleDateString('ru-RU') : '',
+                item.shk_id || '',
+                item.retail_price_withdisc_rub || 0,
+                item.delivery_amount || 0,
+                item.return_amount || 0,
+                item.delivery_rub || 0,
+                item.gi_box_type_name || '',
+                item.product_discount_for_report || 0,
+                item.supplier_promo || 0,
+                item.rid || '',
+                item.ppvz_spp_prc || 0,
+                item.ppvz_kvw_prc_base || 0,
+                item.ppvz_kvw_prc || 0,
+                item.sup_rating_prc_up || 0,
+                item.is_kgvp_v2 || 0,
+                item.ppvz_sales_commission || 0,
+                item.ppvz_for_pay || 0,
+                item.ppvz_reward || 0,
+                item.acquiring_fee || 0,
+                item.acquiring_percent || 0,
+                item.acquiring_bank || '',
+                item.ppvz_vw || 0,
+                item.ppvz_vw_nds || 0,
+                item.ppvz_office_id || '',
+                item.ppvz_supplier_id || '',
+                item.ppvz_supplier_name || '',
+                item.ppvz_inn || '',
+                item.declaration_number || '',
+                item.bonus_type_name || '',
+                item.sticker_id || '',
+                item.site_country || '',
+                item.penalty || 0,
+                item.additional_payment || 0,
+                item.rebill_logistic_cost || 0,
+                item.rebill_logistic_org || '',
+                item.kiz || '',
+                item.storage_fee || 0,
+                item.deduction || 0,
+                item.acceptance || 0,
+                item.srid || ''
+            ]);
+          });
 
-            // Форматируем числовые колонки для отчета платной приемки в российском формате
-            const acceptanceNumericColumns = [6, 7]; // Количество товаров, Суммарная стоимость приёмки
-            acceptanceNumericColumns.forEach(columnIndex => {
+            // Добавляем заголовок и формулы в столбец BN "Даты отчета"
+            console.log("📝 Добавляем столбец 'Даты отчета' в BN...");
+            
+            // Устанавливаем заголовок в BN1
+            worksheet.getCell('BN1').value = 'Даты отчета';
+            
+            // Добавляем формулы для данных
+            for (let rowIndex = 2; rowIndex <= realizationData.length + 1; rowIndex++) {
+              const cell = worksheet.getCell(`BN${rowIndex}`);
+              cell.value = { formula: `B${rowIndex}&" - "&C${rowIndex}` };
+            }
+
+            // Форматируем числовые колонки в российском формате (числовой формат с 2 знаками после запятой)
+            const numericColumns = [16, 17, 18, 27, 28, 29, 30, 40, 41, 42, 43, 45, 46, 55, 56, 60, 61, 62]; // Количество, Цена розничная, Сумма продаж, Цена с учетом скидки, Количество доставок, Количество возвратов, Стоимость логистики, Комиссия за продажи, К доплате, Вознаграждение, Эквайринг, Логистика ВВ, НДС логистики ВВ, Штрафы, Доплаты, Стоимость хранения, Прочие удержания, Стоимость платной приёмки
+            numericColumns.forEach(columnIndex => {
               const column = worksheet.getColumn(columnIndex);
               column.eachCell((cell, rowNumber) => {
                 if (rowNumber > 1) { // Пропускаем заголовок
-                  cell.numFmt = '[$-419]# ##0,00;[$-419]-# ##0,00'; // Российский формат с локалью
+                  // Российский числовой формат с запятой как десятичный разделитель
+                  cell.numFmt = '[$-419]# ##0,00';
+                  cell.value = Number(cell.value) || 0; // Принудительно делаем значение числом
                 }
               });
             });
 
-            console.log(`✅ Отчет "Платная приемка" создан за ${Date.now() - acceptanceStartTime}ms с ${acceptanceData.length} записями`);
+            console.log(`✅ Отчет детализации создан за ${Date.now() - detailsStartTime}ms с ${realizationData.length} записями`);
             
           } else {
-            console.log("ℹ️ Нет данных для создания отчета 'Платная приемка' - создаем пустой шаблон");
+            console.log("ℹ️ Нет данных для создания отчета детализации - создаем пустой шаблон");
             
+                        // Создаем пустой шаблон с правильными заголовками
             headers = [
-              'Дата создания поставки',
+              'Номер отчёта',
+              'Дата начала отчётного периода',
+              'Дата конца отчётного периода',
+              'Дата формирования отчёта',
+              'Валюта отчёта',
+              'Договор',
+              'Номер строки',
               'Номер поставки',
-              'Артикул Wildberries',
-              'Дата приёмки',
-              'Предмет (подкатегория)',
-              'Количество товаров, шт.',
-              'Суммарная стоимость приёмки, ₽'
+              'Предмет',
+              'Артикул WB',
+              'Бренд',
+              'Артикул продавца',
+              'Размер',
+              'Баркод',
+              'Тип документа',
+              'Количество',
+              'Цена розничная',
+              'Сумма продаж (возвратов)',
+              'Согласованная скидка',
+              'Процент комиссии',
+              'Склад',
+              'Обоснование для оплаты',
+              'Дата заказа',
+              'Дата продажи',
+              'Дата операции',
+              'Штрих-код',
+              'Цена розничная с учетом согласованной скидки',
+              'Количество доставок',
+              'Количество возвратов',
+              'Стоимость логистики',
+              'Тип коробов',
+              'Согласованный продуктовый дисконт',
+              'Промокод',
+              'Уникальный идентификатор',
+              'Скидка постоянного покупателя',
+              'Размер кВВ без НДС, %',
+              'Итоговый кВВ без НДС, %',
+              'Размер снижения кВВ из-за рейтинга',
+              'Размер снижения кВВ из-за акции',
+              'Вознаграждение с продажи до вычета',
+              'К перечислению продавцу',
+              'Возмещение за выдачу и возврат',
+              'Возмещение издержек по эквайрингу',
+              'Наименование банка-эквайера',
+              'Вознаграждение WB без НДС',
+              'НДС с вознаграждения WB',
+              'Номер офиса',
+              'Наименование офиса доставки',
+              'Номер партнера',
+              'Партнер',
+              'ИНН',
+              'Номер таможенной декларации',
+              'Обоснование штрафов и доплат',
+              'Цифровое значение стикера, который клеится на товар',
+              'Страна продажи',
+              'Штрафы',
+              'Доплаты',
+              'Возмещение издержек по',
+              'Организатор перевозки',
+              'Код маркировки',
+              'Стоимость хранения',
+              'Прочие удержания/выплаты',
+              'Стоимость платной приёмки',
+              'Уникальный идентификатор автора'
             ];
 
             // Добавляем заголовки для пустого шаблона
             worksheet.addRow(headers);
+            
+            // Добавляем заголовок "Даты отчета" в BN1 для пустого шаблона
+            worksheet.getCell('BN1').value = 'Даты отчета';
             const emptyHeaderRow = worksheet.getRow(1);
             emptyHeaderRow.font = { bold: true };
             emptyHeaderRow.fill = {
@@ -731,18 +504,19 @@ export async function POST(request: NextRequest) {
             
             headers.forEach((header, index) => {
               const column = worksheet.getColumn(index + 1);
-              column.width = Math.max(header.length + 5, 15);
+              column.width = Math.max(header.length + 2, 12);
             });
           }
         } catch (error) {
-          console.error('❌ Ошибка при получении данных платной приемки:', error);
+          console.error('❌ Ошибка при получении данных детализации:', error);
           return NextResponse.json({ 
-            error: `Ошибка при получении данных платной приемки: ${error instanceof Error ? error.message : 'Неизвестная ошибка'}` 
+            error: `Ошибка при получении данных детализации: ${error instanceof Error ? error.message : 'Неизвестная ошибка'}` 
           }, { status: 500 });
         }
         break;
 
       case 'products':
+
         // Подключаемся к базе данных и получаем токен
         await connectToDatabase();
         
@@ -760,10 +534,6 @@ export async function POST(request: NextRequest) {
         console.log('🚀 Начало создания списка товаров...');
         const productsStartTime = Date.now();
 
-                 // Данные реализации больше не используются для товаров
-         const realizationData: import('@/app/lib/product-utils').RealizationItem[] = [];
-         console.log('ℹ️ Данные реализации не загружаются для списка товаров');
-
                  // Импортируем функции для работы с товарами
          const { getCostPriceData, transformCostPriceToExcel, loadSavedCostPrices } = await import('@/app/lib/product-utils');
 
@@ -771,7 +541,7 @@ export async function POST(request: NextRequest) {
          const savedCostPrices = await loadSavedCostPrices(tokenId);
 
          // Получаем данные себестоимости с сохраненными ценами
-         const costPriceData = await getCostPriceData(productsTokenDoc.apiKey, savedCostPrices, realizationData);
+        const costPriceData = await getCostPriceData(productsTokenDoc.apiKey, savedCostPrices);
 
         fileName = `Список товаров - ${startDate}–${endDate}.xlsx`;
 
@@ -1063,6 +833,389 @@ export async function POST(request: NextRequest) {
             const column = worksheet.getColumn(index + 1);
             column.width = Math.max(header.length + 5, 15);
           });
+        }
+        break;
+
+      case 'acceptance':
+        // Подключаемся к базе данных и получаем токен
+        await connectToDatabase();
+        
+        let acceptanceTokenDoc;
+        try {
+          acceptanceTokenDoc = await Token.findById(tokenId);
+        } catch {
+          return NextResponse.json({ error: 'Невалидный ID токена' }, { status: 400 });
+        }
+        
+        if (!acceptanceTokenDoc) {
+          return NextResponse.json({ error: 'Токен не найден' }, { status: 404 });
+        }
+
+        console.log('🚀 Начало создания отчета платной приемки...');
+        const acceptanceStartTime = Date.now();
+
+        fileName = `Платная приемка - ${startDate}–${endDate}.xlsx`;
+
+        try {
+          // Получаем данные платной приемки
+          const acceptanceUrl = `https://marketplace-api.wildberries.ru/api/v3/acceptance-report?dateFrom=${startDate}&dateTo=${endDate}`;
+          const acceptanceResponse = await fetch(acceptanceUrl, {
+            method: 'GET',
+            headers: {
+              'Authorization': acceptanceTokenDoc.apiKey,
+              'Content-Type': 'application/json'
+            }
+          });
+
+          if (!acceptanceResponse.ok) {
+            if (acceptanceResponse.status === 401) {
+              throw new Error('Неверный или недействительный API токен');
+            }
+            throw new Error(`Ошибка API платной приемки: ${acceptanceResponse.status}`);
+          }
+
+          const acceptanceData = await acceptanceResponse.json();
+          console.log(`📊 Получено записей платной приемки: ${acceptanceData.length || 0}`);
+
+          if (acceptanceData && acceptanceData.length > 0) {
+            headers = [
+              'Дата',
+              'Кол-во',
+              'Стоимость за единицу (руб)',
+              'Общая стоимость (руб)',
+              'Артикул WB',
+              'Артикул поставщика',
+              'Предмет',
+              'Бренд',
+              'Размер'
+            ];
+
+            // Добавляем заголовки
+            worksheet.addRow(headers);
+            const headerRow = worksheet.getRow(1);
+            headerRow.font = { bold: true };
+            headerRow.fill = {
+              type: 'pattern',
+              pattern: 'solid',
+              fgColor: { argb: 'FFE0E0E0' }
+            };
+
+            // Добавляем данные
+            acceptanceData.forEach((item: {
+              date?: string;
+              count?: number;
+              unitPrice?: number;
+              totalPrice?: number;
+              nmId?: string;
+              vendorCode?: string;
+              subject?: string;
+              brand?: string;
+              size?: string;
+            }) => {
+              worksheet.addRow([
+                item.date ? new Date(item.date).toLocaleDateString('ru-RU') : '',
+                item.count || 0,
+                item.unitPrice || 0,
+                item.totalPrice || 0,
+                item.nmId || '',
+                item.vendorCode || '',
+                item.subject || '',
+                item.brand || '',
+                item.size || ''
+              ]);
+            });
+
+            // Форматируем числовые колонки в российском формате
+            const numericColumns = [2, 3, 4]; // Кол-во, Стоимость за единицу, Общая стоимость
+            numericColumns.forEach(columnIndex => {
+              const column = worksheet.getColumn(columnIndex);
+              column.eachCell((cell, rowNumber) => {
+                if (rowNumber > 1) {
+                  cell.numFmt = '[$-419]# ##0,00';
+                  cell.value = Number(cell.value) || 0;
+                }
+              });
+            });
+
+            // Настройка ширины колонок
+            headers.forEach((header, index) => {
+              const column = worksheet.getColumn(index + 1);
+              column.width = Math.max(header.length + 5, 15);
+            });
+          } else {
+            // Пустой шаблон
+            headers = [
+              'Дата',
+              'Кол-во',
+              'Стоимость за единицу (руб)',
+              'Общая стоимость (руб)',
+              'Артикул WB',
+              'Артикул поставщика',
+              'Предмет',
+              'Бренд',
+              'Размер'
+            ];
+
+            worksheet.addRow(headers);
+            const emptyHeaderRow = worksheet.getRow(1);
+            emptyHeaderRow.font = { bold: true };
+            emptyHeaderRow.fill = {
+              type: 'pattern',
+              pattern: 'solid',
+              fgColor: { argb: 'FFE0E0E0' }
+            };
+
+            headers.forEach((header, index) => {
+              const column = worksheet.getColumn(index + 1);
+              column.width = Math.max(header.length + 5, 15);
+            });
+          }
+
+          console.log(`✅ Отчет платной приемки создан за ${Date.now() - acceptanceStartTime}ms`);
+        } catch (error) {
+          console.error('❌ Ошибка при получении данных платной приемки:', error);
+          return NextResponse.json({ 
+            error: `Ошибка при получении данных платной приемки: ${error instanceof Error ? error.message : 'Неизвестная ошибка'}` 
+          }, { status: 500 });
+        }
+        break;
+
+      case 'storage':
+        // Подключаемся к базе данных и получаем токен
+        await connectToDatabase();
+        
+        let storageTokenDoc;
+        try {
+          storageTokenDoc = await Token.findById(tokenId);
+        } catch {
+          return NextResponse.json({ error: 'Невалидный ID токена' }, { status: 400 });
+        }
+        
+        if (!storageTokenDoc) {
+          return NextResponse.json({ error: 'Токен не найден' }, { status: 404 });
+        }
+
+        console.log('🚀 Начало создания отчета платного хранения...');
+        const storageStartTime = Date.now();
+
+        fileName = `Платное хранение - ${startDate}–${endDate}.xlsx`;
+
+        try {
+          // Шаг 1: Создаем задание на генерацию отчета
+          console.log('📋 Создание задания на генерацию отчета платного хранения...');
+          const createTaskUrl = `https://seller-analytics-api.wildberries.ru/api/v1/paid_storage?dateFrom=${startDate}&dateTo=${endDate}`;
+          
+          const createTaskResponse = await fetch(createTaskUrl, {
+            method: 'GET',
+            headers: {
+              'Authorization': storageTokenDoc.apiKey,
+              'Content-Type': 'application/json'
+            }
+          });
+
+          if (!createTaskResponse.ok) {
+            if (createTaskResponse.status === 401) {
+              throw new Error('Неверный или недействительный API токен');
+            }
+            throw new Error(`Ошибка создания задания: ${createTaskResponse.status}`);
+          }
+
+          const taskResponse = await createTaskResponse.json();
+          const taskId = taskResponse.data?.taskId;
+          
+          if (!taskId) {
+            throw new Error('Не получен ID задания');
+          }
+
+          console.log(`📋 Задание создано с ID: ${taskId}`);
+
+          // Шаг 2: Ждем готовности отчета (проверяем статус)
+          console.log('⏳ Ожидание готовности отчета...');
+          let attempts = 0;
+          const maxAttempts = 30; // 30 попыток по 5 секунд = 2.5 минуты максимум
+          let isReady = false;
+
+          while (!isReady && attempts < maxAttempts) {
+            attempts++;
+            console.log(`🔄 Проверка статуса, попытка ${attempts}/${maxAttempts}...`);
+            
+            const statusUrl = `https://seller-analytics-api.wildberries.ru/api/v1/paid_storage/tasks/${taskId}/status`;
+            const statusResponse = await fetch(statusUrl, {
+              method: 'GET',
+              headers: {
+                'Authorization': storageTokenDoc.apiKey,
+                'Content-Type': 'application/json'
+              }
+            });
+
+            if (statusResponse.ok) {
+              const statusData = await statusResponse.json();
+              console.log(`📊 Статус задания: ${statusData.data?.status}`);
+              
+              if (statusData.data?.status === 'done') {
+                isReady = true;
+                break;
+              } else if (statusData.data?.status === 'error') {
+                throw new Error('Ошибка при генерации отчета на сервере WB');
+              }
+            }
+
+            if (!isReady && attempts < maxAttempts) {
+              await new Promise(resolve => setTimeout(resolve, 5000)); // Ждем 5 секунд
+            }
+          }
+
+          if (!isReady) {
+            throw new Error('Превышено время ожидания генерации отчета (2.5 минуты)');
+          }
+
+          // Шаг 3: Получаем готовый отчет
+          console.log('📥 Скачивание готового отчета...');
+          const downloadUrl = `https://seller-analytics-api.wildberries.ru/api/v1/paid_storage/tasks/${taskId}/download`;
+          const downloadResponse = await fetch(downloadUrl, {
+            method: 'GET',
+            headers: {
+              'Authorization': storageTokenDoc.apiKey,
+              'Content-Type': 'application/json'
+            }
+          });
+
+          if (!downloadResponse.ok) {
+            throw new Error(`Ошибка скачивания отчета: ${downloadResponse.status}`);
+          }
+
+          const storageData = await downloadResponse.json();
+          console.log(`📊 Получено записей платного хранения: ${storageData.length || 0}`);
+
+          if (storageData && storageData.length > 0) {
+            headers = [
+              'Дата',
+              'Артикул WB',
+              'Артикул поставщика',
+              'Предмет',
+              'Бренд',
+              'Размер',
+              'Объем (л)',
+              'Склад',
+              'Коэффициент склада',
+              'Логистический коэффициент',
+              'Стоимость хранения (руб)',
+              'Количество баркодов',
+              'Тип расчета'
+            ];
+
+            // Добавляем заголовки
+            worksheet.addRow(headers);
+            const headerRow = worksheet.getRow(1);
+            headerRow.font = { bold: true };
+            headerRow.fill = {
+              type: 'pattern',
+              pattern: 'solid',
+              fgColor: { argb: 'FFE0E0E0' }
+            };
+
+            // Добавляем данные согласно новой структуре API
+            storageData.forEach((item: {
+              date?: string;
+              nmId?: number;
+              vendorCode?: string;
+              subject?: string;
+              brand?: string;
+              size?: string;
+              volume?: number;
+              warehouse?: string;
+              warehouseCoef?: number;
+              logWarehouseCoef?: number;
+              warehousePrice?: number;
+              barcodesCount?: number;
+              calcType?: string;
+            }) => {
+              worksheet.addRow([
+                item.date ? new Date(item.date).toLocaleDateString('ru-RU') : '',
+                item.nmId || '',
+                item.vendorCode || '',
+                item.subject || '',
+                item.brand || '',
+                item.size || '',
+                item.volume || 0,
+                item.warehouse || '',
+                item.warehouseCoef || 0,
+                item.logWarehouseCoef || 0,
+                item.warehousePrice || 0,
+                item.barcodesCount || 0,
+                item.calcType || ''
+              ]);
+            });
+
+            // Форматируем числовые колонки в российском формате
+            const numericColumns = [7, 9, 10, 11, 12]; // Объем, Коэффициенты, Стоимость, Количество
+            numericColumns.forEach(columnIndex => {
+              const column = worksheet.getColumn(columnIndex);
+              column.eachCell((cell, rowNumber) => {
+                if (rowNumber > 1) {
+                  cell.numFmt = '[$-419]# ##0,00';
+                  cell.value = Number(cell.value) || 0;
+                }
+              });
+            });
+
+            // Настройка ширины колонок
+            headers.forEach((header, index) => {
+              const column = worksheet.getColumn(index + 1);
+              column.width = Math.max(header.length + 5, 15);
+            });
+
+            // Добавляем столбец "Дата отчета" в O1
+            console.log("📝 Добавляем столбец 'Дата отчета' в O...");
+            worksheet.getCell('O1').value = 'Дата отчета';
+            
+            // Добавляем период отчета для всех строк данных
+            for (let rowIndex = 2; rowIndex <= storageData.length + 1; rowIndex++) {
+              const cell = worksheet.getCell(`O${rowIndex}`);
+              cell.value = `${new Date(startDate).toLocaleDateString('ru-RU')} - ${new Date(endDate).toLocaleDateString('ru-RU')}`;
+            }
+          } else {
+            // Пустой шаблон
+            headers = [
+              'Дата',
+              'Артикул WB',
+              'Артикул поставщика',
+              'Предмет',
+              'Бренд',
+              'Размер',
+              'Объем (л)',
+              'Склад',
+              'Коэффициент склада',
+              'Логистический коэффициент',
+              'Стоимость хранения (руб)',
+              'Количество баркодов',
+              'Тип расчета'
+            ];
+
+            worksheet.addRow(headers);
+            const emptyHeaderRow = worksheet.getRow(1);
+            emptyHeaderRow.font = { bold: true };
+            emptyHeaderRow.fill = {
+              type: 'pattern',
+              pattern: 'solid',
+              fgColor: { argb: 'FFE0E0E0' }
+            };
+
+            headers.forEach((header, index) => {
+              const column = worksheet.getColumn(index + 1);
+              column.width = Math.max(header.length + 5, 15);
+            });
+
+            // Добавляем столбец "Дата отчета" в O1 для пустого шаблона
+            worksheet.getCell('O1').value = 'Дата отчета';
+          }
+
+          console.log(`✅ Отчет платного хранения создан за ${Date.now() - storageStartTime}ms`);
+        } catch (error) {
+          console.error('❌ Ошибка при получении данных платного хранения:', error);
+          return NextResponse.json({ 
+            error: `Ошибка при получении данных платного хранения: ${error instanceof Error ? error.message : 'Неизвестная ошибка'}` 
+          }, { status: 500 });
         }
         break;
 

@@ -88,10 +88,10 @@ export default function ReportsPage() {
 
   const reports = [
     { key: 'details', name: 'Отчет детализации', color: 'blue' },
-    { key: 'storage', name: 'Платное хранение', color: 'green' },
-    { key: 'acceptance', name: 'Платная приемка', color: 'purple' },
     { key: 'products', name: 'Список товаров', color: 'orange' },
-    { key: 'finances', name: 'Финансы РК', color: 'red' }
+    { key: 'finances', name: 'Финансы РК', color: 'red' },
+    { key: 'acceptance', name: 'Платная приемка', color: 'green' },
+    { key: 'storage', name: 'Платное хранение', color: 'purple' }
   ];
 
   if (loading) {

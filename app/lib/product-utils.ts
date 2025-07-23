@@ -1,4 +1,4 @@
-import { getStorageData, StorageItem } from './storage-utils';
+
 
 // Интерфейсы для работы с товарами
 export interface ProductCard {
@@ -33,13 +33,7 @@ export interface CostPriceData {
   source?: string;
 }
 
-// Используем интерфейс DetailReportItem из route.ts
-export interface RealizationItem {
-  nm_id?: number;
-  sa_name?: string;
-  barcode?: string;
-  retail_price_withdisc_rub?: number;
-}
+
 
 /**
  * Получает карточки товаров из Content API WB с поддержкой пагинации
@@ -157,17 +151,11 @@ async function getProductCards(token: string, maxPages: number = 10): Promise<Pr
  */
 export async function getCostPriceData(
   token: string, 
-  savedCostPrices: {[key: string]: string} = {}, 
-  realizationData: RealizationItem[] = []
+  savedCostPrices: {[key: string]: string} = {}
 ): Promise<CostPriceData[]> {
   // Валидация входных параметров
   if (!token || typeof token !== 'string' || token.trim().length === 0) {
     throw new Error('Токен не указан или некорректен');
-  }
-
-  if (!Array.isArray(realizationData)) {
-    console.warn('⚠️ realizationData не является массивом, используем пустой массив');
-    realizationData = [];
   }
 
   if (typeof savedCostPrices !== 'object' || savedCostPrices === null) {
@@ -177,7 +165,7 @@ export async function getCostPriceData(
 
   try {
     console.log('💰 Получение данных себестоимости товаров');
-    console.log(`📊 Параметры: сохраненных цен: ${Object.keys(savedCostPrices).length}, записей реализации: ${realizationData.length}`);
+    console.log(`📊 Параметры: сохраненных цен: ${Object.keys(savedCostPrices).length}`);
     
     const costPriceData: CostPriceData[] = [];
     
@@ -191,36 +179,26 @@ export async function getCostPriceData(
       cards = [];
     }
 
-    // Получаем данные о хранении для получения предметов
-    let storageData: StorageItem[] = [];
-    try {
-      const today = new Date().toISOString().split('T')[0];
-      storageData = await getStorageData(token, today, today);
-      console.log(`📦 Получено данных хранения: ${storageData.length} записей`);
-    } catch (error) {
-      console.warn('⚠️ Не удалось получить данные хранения:', error);
-    }
-
-    // Создаем карту предметов из данных хранения
+    // Создаем карту предметов из карточек товаров
     const subjectMap = new Map<string, string>();
-    storageData.forEach((item: StorageItem) => {
-      const nmId = item.nmId?.toString() || '';
-      const vendorCode = item.vendorCode || '';
-      const subject = item.subject || '';
+    
+    // Создаем карту существующих карточек для быстрого поиска
+    const cardsMap = new Map<string, ProductCard>();
+    cards.forEach((card: ProductCard) => {
+      const nmId = card.nmID?.toString() || '';
+      const vendorCode = card.vendorCode || '';
+      const subject = card.object || card.subjectName || '';
       
+      cardsMap.set(nmId, card);
+      cardsMap.set(vendorCode, card);
+      
+      // Заполняем карту предметов из карточек
       if (subject && nmId) {
         subjectMap.set(nmId, subject);
       }
       if (subject && vendorCode) {
         subjectMap.set(vendorCode, subject);
       }
-    });
-
-    // Создаем карту существующих карточек для быстрого поиска
-    const cardsMap = new Map<string, ProductCard>();
-    cards.forEach((card: ProductCard) => {
-      cardsMap.set(card.nmID?.toString() || '', card);
-      cardsMap.set(card.vendorCode || '', card);
     });
 
     // Шаг 2: Преобразуем карточки в данные себестоимости (оптимизированно)
@@ -303,86 +281,7 @@ export async function getCostPriceData(
       }
     });
 
-    // Шаг 3: Добавляем товары из реализации, которых нет в карточках (оптимизированно)
-    console.log('📦 Добавление товаров из реализации, отсутствующих в карточках...');
-    
-    // Создаем оптимизированные индексы для быстрого поиска
-    const existingProducts = new Set<string>();
-    const costPriceIndex = new Map<string, CostPriceData>();
-    
-    // Индексируем существующие товары
-    costPriceData.forEach(item => {
-      const key1 = `${item.nmID}-${item.barcode}`;
-      const key2 = `${item.vendorCode}-${item.barcode}`;
-      existingProducts.add(key1);
-      existingProducts.add(key2);
-      costPriceIndex.set(key1, item);
-      costPriceIndex.set(key2, item);
-    });
-
-    const missingProducts = new Map<string, CostPriceData>();
-    const batchSize = 1000; // Обрабатываем батчами для экономии памяти
-    
-    console.log(`📊 Обработка ${realizationData.length} записей реализации батчами по ${batchSize}...`);
-    
-    for (let i = 0; i < realizationData.length; i += batchSize) {
-      const batch = realizationData.slice(i, i + batchSize);
-      
-      batch.forEach((item: RealizationItem, index: number) => {
-        // Логирование прогресса для больших объемов
-        if ((i + index) % 5000 === 0 && (i + index) > 0) {
-          console.log(`📊 Обработано ${i + index}/${realizationData.length} записей реализации`);
-        }
-
-        const nmId = item.nm_id?.toString() || '';
-        const vendorCode = item.sa_name || '';
-        const barcode = item.barcode || '';
-        
-        if (!vendorCode) return; // Пропускаем товары без артикула продавца
-        
-        const productKey1 = `${nmId}-${barcode}`;
-        const productKey2 = `${vendorCode}-${barcode}`;
-        
-        // Если товара нет среди карточек, добавляем его
-        if (!existingProducts.has(productKey1) && !existingProducts.has(productKey2)) {
-          const uniqueKey = vendorCode; // Используем артикул продавца как уникальный ключ
-          
-          if (!missingProducts.has(uniqueKey)) {
-            const costKey = `${nmId}-${barcode}`;
-            const savedCostPrice = savedCostPrices[costKey] ? parseFloat(savedCostPrices[costKey]) : 0;
-            
-            // Получаем предмет из карты субъектов или используем артикул как fallback
-            const subject = subjectMap.get(nmId) || subjectMap.get(vendorCode) || vendorCode;
-            
-            missingProducts.set(uniqueKey, {
-              nmID: parseInt(nmId) || 0,
-              vendorCode: vendorCode,
-              object: subject,
-              brand: 'Неизвестный бренд',
-              sizeName: 'Размер не указан',
-              barcode: barcode,
-              price: item.retail_price_withdisc_rub || 0,
-              costPrice: savedCostPrice,
-              createdAt: '',
-              updatedAt: '',
-              source: 'realization' // Помечаем источник данных
-            });
-          }
-        }
-      });
-      
-      // Короткая пауза между батчами для снижения нагрузки
-      if (i + batchSize < realizationData.length) {
-        await new Promise(resolve => setTimeout(resolve, 10));
-      }
-    }
-
-    // Добавляем отсутствующие товары оптимизированно
-    console.log(`📦 Добавление ${missingProducts.size} отсутствующих товаров...`);
-    costPriceData.push(...Array.from(missingProducts.values()));
-
     console.log(`✅ Обработано карточек из API: ${cards.length}`);
-    console.log(`📦 Добавлено товаров из реализации: ${missingProducts.size}`);
     console.log(`📊 Итого позиций в листе "Список товаров": ${costPriceData.length}`);
     
     return costPriceData;
@@ -408,7 +307,7 @@ export function transformCostPriceToExcel(costPriceData: CostPriceData[]) {
     "Маржа": item.costPrice > 0 ? (item.price - item.costPrice) : 0,
     "Рентабельность (%)": item.costPrice > 0 && item.price > 0 ? 
       ((item.price - item.costPrice) / item.price * 100).toFixed(2) : 0,
-    "Источник данных": item.source === 'realization' ? 'Из реализации' : 'Из карточек API',
+    "Источник данных": 'Из карточек API',
     "Дата создания": item.createdAt || "",
     "Дата обновления": item.updatedAt || ""
   }));
