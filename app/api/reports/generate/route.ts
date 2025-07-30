@@ -416,6 +416,39 @@ export async function POST(request: NextRequest) {
               });
             });
 
+            // Создаем новый лист "Товары"
+            const productsWorksheet = workbook.addWorksheet('Товары');
+            const productHeaders = ['Артикул продавца', 'Артикул WB'];
+            const productHeaderRow = productsWorksheet.addRow(productHeaders);
+            productHeaderRow.font = { bold: true };
+            productHeaderRow.fill = {
+              type: 'pattern',
+              pattern: 'solid',
+              fgColor: { argb: 'FFE0E0E0' }
+            };
+            productsWorksheet.getColumn(1).width = 30;
+            productsWorksheet.getColumn(2).width = 20;
+
+            // Собираем уникальные товары
+            const uniqueProducts = new Map<string, { vendorCode: string, nmId: number }>();
+            realizationData.forEach(item => {
+              if (item.nm_id) {
+                const key = `${item.nm_id}`;
+                if (!uniqueProducts.has(key)) {
+                  uniqueProducts.set(key, {
+                    vendorCode: item.sa_name || '',
+                    nmId: item.nm_id
+                  });
+                }
+              }
+            });
+
+            // Добавляем уникальные товары на лист
+            uniqueProducts.forEach(prod => {
+              productsWorksheet.addRow([prod.vendorCode, prod.nmId]);
+            });
+
+
             console.log(`✅ Отчет детализации создан за ${Date.now() - detailsStartTime}ms с ${realizationData.length} записями`);
             
           } else {
