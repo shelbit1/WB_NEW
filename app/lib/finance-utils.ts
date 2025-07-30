@@ -6,7 +6,6 @@ export interface FinancialData {
   bill: number;
   type: string;
   docNumber: string;
-  sku?: string;
   campName?: string;  // Название кампании из API
 }
 
@@ -131,57 +130,103 @@ export async function fetchAccountBalance(apiKey: string): Promise<{balance: num
 }
 
 // Функция получения детальных данных по артикулам кампаний (упрощенная версия)
-export async function fetchCampaignArticles(apiKey: string, campaigns: Campaign[]): Promise<Map<number, string>> {
-  const articlesMap = new Map<number, string>();
+export async function fetchCampaignSkus(apiKey: string, campaigns: CampaignInfo[]): Promise<Map<number, string>> {
+  const skusMap = new Map<number, string>();
   
   try {
-    console.log(`📊 Попытка получения данных артикулов для ${campaigns.length} кампаний...`);
+    console.log(`📊 Запрос SKU для ${campaigns.length} кампаний...`);
     
-    // Пробуем получить данные через API бюджета (может содержать дополнительную информацию)
-    const batchSize = 5; // Уменьшаем размер пакета для надежности
-    for (let i = 0; i < campaigns.length; i += batchSize) {
-      const batch = campaigns.slice(i, i + batchSize);
-      const promises = batch.map(async (campaign) => {
-        try {
-          // Пробуем API бюджета кампании (более надежный)
-          const response = await fetch(`https://advert-api.wildberries.ru/adv/v1/budget?id=${campaign.advertId}`, {
-            method: 'GET',
-            headers: {
-              'Authorization': apiKey,
-              'Content-Type': 'application/json'
-            }
-          });
+    const campaignIds = campaigns.map(c => c.advertId);
+    const batchSize = 50; // Максимум 50 ID в запросе
 
-          if (response.ok) {
-            const budgetData = await response.json();
-            // Есть бюджет - значит кампания активна
-            const budgetInfo = `Бюджет: ${budgetData.total || 0} руб.`;
-            articlesMap.set(campaign.advertId, `${campaign.name || campaign.advertId} (${budgetInfo})`);
-          } else {
-            // API не работает - используем базовую информацию
-            articlesMap.set(campaign.advertId, `${campaign.name || 'Кампания'} ID:${campaign.advertId}`);
-          }
-        } catch {
-          // При любой ошибке используем базовую информацию о кампании
-          articlesMap.set(campaign.advertId, `${campaign.name || 'Кампания'} ID:${campaign.advertId}`);
-        }
-      });
+    for (let i = 0; i < campaignIds.length; i += batchSize) {
+      const batchIds = campaignIds.slice(i, i + batchSize);
       
-      await Promise.all(promises);
+      try {
+        const response = await fetch('https://advert-api.wildberries.ru/adv/v1/promotion/adverts', {
+          method: 'POST',
+          headers: {
+            'Authorization': apiKey,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(batchIds)
+        });
+
+        if (response.ok) {
+          const campaignsData = await response.json();
+          if (Array.isArray(campaignsData)) {
+            campaignsData.forEach(campaignData => {
+              if (campaignData && campaignData.advertId) {
+                const skus: (number | string)[] = [];
+
+                // Для автоматических кампаний (type 8)
+                if (campaignData.type === 8 && campaignData.autoParams && Array.isArray(campaignData.autoParams.nms)) {
+                  skus.push(...campaignData.autoParams.nms);
+                }
+
+                // Для аукционных кампаний (type 9)
+                if (campaignData.type === 9 && Array.isArray(campaignData.auction_multibids)) {
+                  const auctionSkus = campaignData.auction_multibids
+                    .map((bid: { nm: number }) => bid.nm)
+                    .filter(Boolean);
+                  skus.push(...auctionSkus);
+                }
+                
+                // Общий параметр для разных типов кампаний
+                if (Array.isArray(campaignData.unitedParams)) {
+                  const unitedSkus = campaignData.unitedParams
+                    .flatMap((p: { nms?: {nm: number}[] }) => p.nms || [])
+                    .map((nm: {nm: number}) => nm.nm)
+                    .filter(Boolean);
+                  skus.push(...unitedSkus);
+                }
+
+                // Старый параметр `params` на всякий случай
+                if (Array.isArray(campaignData.params)) {
+                    const paramsSkus = campaignData.params
+                      .flatMap((p: { nms?: {nm: number}[] }) => p.nms || [])
+                      .map((nm: {nm: number}) => nm.nm)
+                      .filter(Boolean);
+                    skus.push(...paramsSkus);
+                }
+                
+                const uniqueSkus = [...new Set(skus)];
+                const skusString = uniqueSkus.join(', ');
+                skusMap.set(campaignData.advertId, skusString || 'Нет SKU');
+              }
+            });
+          }
+        } else {
+          console.warn(`⚠️ Не удалось получить SKU для пакета кампаний, начинающегося с ID ${batchIds[0]}: ${response.status}`);
+          batchIds.forEach(id => skusMap.set(id, 'Ошибка получения SKU'));
+        }
+      } catch (error) {
+        console.error(`❌ Ошибка при запросе SKU для пакета кампаний, начинающегося с ID ${batchIds[0]}:`, error);
+        batchIds.forEach(id => skusMap.set(id, 'Ошибка запроса'));
+      }
+      
       console.log(`📊 Обработано ${Math.min(i + batchSize, campaigns.length)} из ${campaigns.length} кампаний`);
+      if (campaignIds.length > i + batchSize) {
+          await new Promise(r => setTimeout(r, 250)); // Пауза между пакетами для соблюдения лимита
+      }
     }
-    
-    console.log(`✅ Подготовлено описаний для ${articlesMap.size} кампаний`);
-    return articlesMap;
-  } catch (error) {
-    console.error('❌ Ошибка при получении данных кампаний:', error);
-    
-    // В случае полной ошибки создаем базовые записи
-    campaigns.forEach(campaign => {
-      articlesMap.set(campaign.advertId, `${campaign.name || 'Кампания'} ID:${campaign.advertId}`);
+
+    // Заполняем пропуски, если для каких-то кампаний не пришел ответ
+    campaignIds.forEach(id => {
+        if (!skusMap.has(id)) {
+            skusMap.set(id, 'Нет данных SKU');
+        }
     });
     
-    return articlesMap;
+    console.log(`✅ Получено SKU для ${skusMap.size} кампаний`);
+    return skusMap;
+
+  } catch (error) {
+    console.error('❌ Ошибка при получении SKU кампаний:', error);
+    campaigns.forEach(campaign => {
+      skusMap.set(campaign.advertId, 'Ошибка');
+    });
+    return skusMap;
   }
 }
 
@@ -227,7 +272,6 @@ export async function fetchFinancialData(apiKey: string, startDate: string, endD
       bill: record.paymentType === 'Счет' ? 1 : 0,
       type: record.type || 'Неизвестно',
       docNumber: record.updNum || '',
-      sku: `Type:${record.advertType || 0} Status:${record.advertStatus || 0}`, // Добавляем тип и статус как SKU
       campName: record.campName || 'Неизвестная кампания' // Добавляем название кампании
     }));
 

@@ -683,7 +683,7 @@ export async function POST(request: NextRequest) {
         }
 
         // Импортируем функции для работы с финансами РК
-        const { fetchCampaignArticles, fetchFinancialData } = await import('@/app/lib/finance-utils');
+        const { fetchCampaignSkus, fetchFinancialData } = await import('@/app/lib/finance-utils');
 
         console.log('🚀 Начало создания листа "Финансы РК"...');
         const financeStartTime = Date.now();
@@ -712,34 +712,33 @@ export async function POST(request: NextRequest) {
           // Получаем детальные данные артикулов для столбца I
           const campaignsArray = Array.from(uniqueCampaigns.values());
           console.log(`📊 Получение детальных данных артикулов для кампаний...`);
-          const articlesMap = await fetchCampaignArticles(financeTokenDoc.apiKey, campaignsArray);
-          console.log(`📊 Получено детальных данных артикулов: ${articlesMap.size} кампаний`);
+          const skusMap = await fetchCampaignSkus(financeTokenDoc.apiKey, campaignsArray);
+          console.log(`📊 Получено детальных данных артикулов: ${skusMap.size} кампаний`);
           
           // Подготавливаем данные для листа "Финансы РК"
           const financeExcelData = financialData.map(record => {
             return {
               "ID кампании": record.advertId,
               "Название кампании": record.campName || 'Неизвестная кампания',
-              "SKU ID": record.sku || 'Нет данных',
               "Дата": record.date,
               "Сумма": record.sum,
               "Источник списания": record.bill === 1 ? 'Счет' : 'Баланс',
               "Тип операции": record.type,
               "Номер документа": record.docNumber,
-              "Артикулы WB": articlesMap.get(record.advertId) || 'Нет данных'
+              "SKU ID": skusMap.get(record.advertId) || 'Нет данных'
             };
           });
 
           headers = [
             'ID кампании',
             'Название кампании', 
-            'SKU ID',
             'Дата',
             'Сумма',
             'Источник списания',
             'Тип операции',
             'Номер документа',
-            'Артикулы WB'
+            'SKU ID',
+            'Период отчета'
           ];
 
           fileName = `Финансы РК - ${startDate}–${endDate}.xlsx`;
@@ -760,13 +759,13 @@ export async function POST(request: NextRequest) {
           const financeColumnWidths = [
             { wch: 15 }, // ID кампании
             { wch: 30 }, // Название кампании
-            { wch: 15 }, // SKU ID
             { wch: 15 }, // Дата
             { wch: 15 }, // Сумма
             { wch: 20 }, // Источник списания
             { wch: 15 }, // Тип операции
             { wch: 20 }, // Номер документа
-            { wch: 40 }, // Артикулы WB (широкий столбец для списка артикулов)
+            { wch: 40 }, // SKU ID (широкий столбец для списка артикулов)
+            { wch: 25 }  // Период отчета
           ];
           
           headers.forEach((header, index) => {
@@ -775,22 +774,23 @@ export async function POST(request: NextRequest) {
           });
 
           // Добавляем данные
+          const reportPeriod = `${new Date(startDate).toLocaleDateString('ru-RU')} - ${new Date(endDate).toLocaleDateString('ru-RU')}`;
           financeExcelData.forEach(item => {
             worksheet.addRow([
               item["ID кампании"],
               item["Название кампании"],
-              item["SKU ID"],
               item["Дата"],
               item["Сумма"],
               item["Источник списания"],
               item["Тип операции"],
               item["Номер документа"],
-              item["Артикулы WB"]
+              item["SKU ID"],
+              reportPeriod
             ]);
           });
 
           // Форматируем числовые колонки для отчета финансов РК в российском формате
-          const financeNumericColumns = [5]; // Сумма
+          const financeNumericColumns = [4]; // Сумма
           financeNumericColumns.forEach(columnIndex => {
             const column = worksheet.getColumn(columnIndex);
             column.eachCell((cell, rowNumber) => {
@@ -808,13 +808,13 @@ export async function POST(request: NextRequest) {
           headers = [
             'ID кампании',
             'Название кампании', 
-            'SKU ID',
             'Дата',
             'Сумма',
             'Источник списания',
             'Тип операции',
             'Номер документа',
-            'Артикулы WB'
+            'SKU ID',
+            'Период отчета'
           ];
 
           fileName = `Финансы РК - ${startDate}–${endDate}.xlsx`;
