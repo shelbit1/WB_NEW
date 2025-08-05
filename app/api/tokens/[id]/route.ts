@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/app/lib/mongodb';
-import Token from '@/app/lib/models/Token';
+import Token, { IToken } from '@/app/lib/models/Token';
 
 export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
   try {
@@ -9,17 +9,15 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     
     await connectDB();
     
-    const { paymentStatus, comment } = body;
+    // Позволяем обновлять любые поля из модели
+    const { name, apiKey, paymentStatus, comment } = body;
 
-    const updateData: any = {};
+    const updateData: Partial<IToken> = {};
 
-    if (paymentStatus) {
-      updateData.paymentStatus = paymentStatus;
-    }
-
-    if (comment !== undefined) {
-      updateData.comment = comment;
-    }
+    if (name) updateData.name = name;
+    if (apiKey) updateData.apiKey = apiKey;
+    if (paymentStatus) updateData.paymentStatus = paymentStatus;
+    if (comment !== undefined) updateData.comment = comment;
     
     const updatedToken = await Token.findByIdAndUpdate(
       id,

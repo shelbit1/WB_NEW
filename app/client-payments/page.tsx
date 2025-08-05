@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { debounce } from 'lodash';
 
@@ -69,7 +69,7 @@ export default function ClientPaymentsPage() {
     }
   }, [tokens]);
   
-  const debouncedCommentUpdate = useCallback(debounce(updateTokenOnServer, 500), [updateTokenOnServer]);
+  const debouncedCommentUpdate = useMemo(() => debounce(updateTokenOnServer, 500), [updateTokenOnServer]);
 
   const handleStatusChange = (tokenId: string, newStatus: Token['paymentStatus']) => {
     updateTokenOnServer(tokenId, { paymentStatus: newStatus });
@@ -129,7 +129,7 @@ export default function ClientPaymentsPage() {
               ))
             ) : (
               <li className="px-6 py-4 text-center text-gray-500">
-                Клиенты не найдены. Добавьте их в разделе "Управление токенами".
+                Клиенты не найдены. Добавьте их в разделе «Управление токенами».
               </li>
             )}
           </ul>
