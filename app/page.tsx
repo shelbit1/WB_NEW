@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Key, Download } from "lucide-react";
+import { Key, Download, DollarSign } from "lucide-react";
 
 export default function Home() {
   return (
@@ -17,7 +17,7 @@ export default function Home() {
           </div>
 
           {/* Navigation Cards */}
-          <div className="grid md:grid-cols-2 gap-8 max-w-4xl mx-auto">
+          <div className="grid md:grid-cols-3 gap-8 max-w-4xl mx-auto">
             <Link 
               href="/tokens"
               className="group bg-white dark:bg-gray-800 rounded-2xl p-8 shadow-sm border border-gray-200 dark:border-gray-700 hover:shadow-md transition-all duration-200 hover:border-blue-300 dark:hover:border-blue-600"
@@ -49,6 +49,22 @@ export default function Home() {
               </div>
               <p className="text-gray-600 dark:text-gray-300 group-hover:text-gray-700 dark:group-hover:text-gray-200 transition-colors">
                 Выбор периода и скачивание отчётов в формате Excel
+              </p>
+            </Link>
+            <Link 
+              href="/client-payments"
+              className="group bg-white dark:bg-gray-800 rounded-2xl p-8 shadow-sm border border-gray-200 dark:border-gray-700 hover:shadow-md transition-all duration-200 hover:border-purple-300 dark:hover:border-purple-600"
+            >
+              <div className="flex items-center space-x-4 mb-4">
+                <div className="bg-purple-100 dark:bg-purple-900 p-3 rounded-xl">
+                  <DollarSign className="w-6 h-6 text-purple-600 dark:text-purple-300" />
+                </div>
+                <h2 className="text-2xl font-semibold text-gray-900 dark:text-white">
+                  Оплаты клиентов
+                </h2>
+              </div>
+              <p className="text-gray-600 dark:text-gray-300 group-hover:text-gray-700 dark:group-hover:text-gray-200 transition-colors">
+                Просмотр и управление оплатами от клиентов
               </p>
             </Link>
           </div>

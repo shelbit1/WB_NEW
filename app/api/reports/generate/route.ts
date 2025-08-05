@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import ExcelJS from 'exceljs';
 import connectToDatabase from '@/app/lib/mongodb';
 import Token from '@/app/lib/models/Token';
+import { ProductCard, ProductSize } from '@/app/lib/product-utils';
 
 // Интерфейс для данных детализации реализации
 interface RealizationDetailItem {
@@ -996,6 +997,11 @@ export async function POST(request: NextRequest) {
         fileName = `Платное хранение - ${startDate}–${endDate}.xlsx`;
 
         try {
+          // Получаем информацию о товарах (включая баркоды) параллельно с запросом отчета
+          const { getProductCards } = await import('@/app/lib/product-utils');
+          console.log('📦 Получение карточек товаров для обогащения данных...');
+          const productCardsPromise = getProductCards(storageTokenDoc.apiKey);
+
           // Шаг 1: Создаем задание на генерацию отчета
           console.log('📋 Создание задания на генерацию отчета платного хранения...');
           const createTaskUrl = `https://seller-analytics-api.wildberries.ru/api/v1/paid_storage?dateFrom=${startDate}&dateTo=${endDate}`;
@@ -1082,11 +1088,29 @@ export async function POST(request: NextRequest) {
           const storageData = await downloadResponse.json();
           console.log(`📊 Получено записей платного хранения: ${storageData.length || 0}`);
 
+          // Обогащаем данные баркодами
+          const productCards = await productCardsPromise;
+          const barcodeMap = new Map<string, string>();
+          productCards.forEach((card: ProductCard) => {
+            if (card.sizes) {
+              card.sizes.forEach((size: ProductSize) => {
+                if (size.skus && size.skus.length > 0) {
+                  // Ключ: nmID-techSize
+                  const key = `${card.nmID}-${size.techSize}`;
+                  barcodeMap.set(key, size.skus.join(', '));
+                }
+              });
+            }
+          });
+          console.log(`🗺️ Создана карта баркодов: ${barcodeMap.size} записей`);
+
+
           if (storageData && storageData.length > 0) {
             headers = [
               'Дата',
               'Артикул WB',
               'Артикул поставщика',
+              'Баркод', // Новая колонка
               'Предмет',
               'Бренд',
               'Размер',
@@ -1125,10 +1149,14 @@ export async function POST(request: NextRequest) {
               barcodesCount?: number;
               calcType?: string;
             }) => {
+              const barcodeKey = `${item.nmId}-${item.size}`;
+              const barcode = barcodeMap.get(barcodeKey) || '';
+
               worksheet.addRow([
                 item.date ? new Date(item.date).toLocaleDateString('ru-RU') : '',
                 item.nmId || '',
                 item.vendorCode || '',
+                barcode, // Добавляем баркод
                 item.subject || '',
                 item.brand || '',
                 item.size || '',
@@ -1143,7 +1171,7 @@ export async function POST(request: NextRequest) {
             });
 
             // Форматируем числовые колонки в российском формате
-            const numericColumns = [7, 9, 10, 11, 12]; // Объем, Коэффициенты, Стоимость, Количество
+            const numericColumns = [8, 10, 11, 12, 13]; // Объем, Коэффициенты, Стоимость, Количество. Сдвиг из-за новой колонки
             numericColumns.forEach(columnIndex => {
               const column = worksheet.getColumn(columnIndex);
               column.eachCell((cell, rowNumber) => {
@@ -1160,13 +1188,13 @@ export async function POST(request: NextRequest) {
               column.width = Math.max(header.length + 5, 15);
             });
 
-            // Добавляем столбец "Дата отчета" в O1
-            console.log("📝 Добавляем столбец 'Дата отчета' в O...");
-            worksheet.getCell('O1').value = 'Дата отчета';
+            // Добавляем столбец "Дата отчета" в P1 (было O1)
+            console.log("📝 Добавляем столбец 'Дата отчета' в P...");
+            worksheet.getCell('P1').value = 'Дата отчета';
             
             // Добавляем период отчета для всех строк данных
             for (let rowIndex = 2; rowIndex <= storageData.length + 1; rowIndex++) {
-              const cell = worksheet.getCell(`O${rowIndex}`);
+              const cell = worksheet.getCell(`P${rowIndex}`);
               cell.value = `${new Date(startDate).toLocaleDateString('ru-RU')} - ${new Date(endDate).toLocaleDateString('ru-RU')}`;
             }
           } else {
@@ -1175,6 +1203,7 @@ export async function POST(request: NextRequest) {
               'Дата',
               'Артикул WB',
               'Артикул поставщика',
+              'Баркод', // Новая колонка
               'Предмет',
               'Бренд',
               'Размер',
@@ -1201,8 +1230,8 @@ export async function POST(request: NextRequest) {
               column.width = Math.max(header.length + 5, 15);
             });
 
-            // Добавляем столбец "Дата отчета" в O1 для пустого шаблона
-            worksheet.getCell('O1').value = 'Дата отчета';
+            // Добавляем столбец "Дата отчета" в P1 для пустого шаблона
+            worksheet.getCell('P1').value = 'Дата отчета';
           }
 
           console.log(`✅ Отчет платного хранения создан за ${Date.now() - storageStartTime}ms`);

@@ -38,7 +38,7 @@ export interface CostPriceData {
 /**
  * Получает карточки товаров из Content API WB с поддержкой пагинации
  */
-async function getProductCards(token: string, maxPages: number = 10): Promise<ProductCard[]> {
+export async function getProductCards(token: string, maxPages: number = 10): Promise<ProductCard[]> {
   if (!token || typeof token !== 'string' || token.trim().length === 0) {
     console.error('❌ Некорректный токен для API карточек');
     return [];

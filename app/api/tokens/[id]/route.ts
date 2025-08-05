@@ -2,62 +2,62 @@ import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/app/lib/mongodb';
 import Token from '@/app/lib/models/Token';
 
-interface RouteParams {
-  params: Promise<{ id: string }>;
-}
-
-export async function PUT(request: NextRequest, { params }: RouteParams) {
+export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
   try {
-    await connectDB();
-    const { id } = await params;
+    const { id } = params;
     const body = await request.json();
     
-    const { name, apiKey } = body;
+    await connectDB();
     
-    if (!name || !apiKey) {
-      return NextResponse.json(
-        { error: 'Название и API-ключ обязательны' },
-        { status: 400 }
-      );
+    const { paymentStatus, comment } = body;
+
+    const updateData: any = {};
+
+    if (paymentStatus) {
+      updateData.paymentStatus = paymentStatus;
     }
 
-    const token = await Token.findByIdAndUpdate(
+    if (comment !== undefined) {
+      updateData.comment = comment;
+    }
+    
+    const updatedToken = await Token.findByIdAndUpdate(
       id,
-      { name, apiKey },
-      { new: true }
+      { $set: updateData },
+      { new: true, runValidators: true }
     );
 
-    if (!token) {
-      return NextResponse.json(
-        { error: 'Токен не найден' },
-        { status: 404 }
-      );
+    if (!updatedToken) {
+      return NextResponse.json({ error: 'Токен не найден' }, { status: 404 });
     }
 
-    return NextResponse.json(token);
-  } catch {
+    return NextResponse.json(updatedToken);
+  } catch (error) {
+    console.error(`Error in PUT /api/tokens/[id]:`, error);
     return NextResponse.json(
-      { error: 'Ошибка при обновлении токена' },
+      { 
+        error: 'Ошибка при обновлении токена',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      },
       { status: 500 }
     );
   }
 }
 
-export async function DELETE(request: NextRequest, { params }: RouteParams) {
+export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
   try {
     await connectDB();
-    const { id } = await params;
-    
-    const token = await Token.findByIdAndDelete(id);
-    
-    if (!token) {
+    const { id } = params;
+    const deletedToken = await Token.findByIdAndDelete(id);
+
+    if (!deletedToken) {
       return NextResponse.json(
         { error: 'Токен не найден' },
         { status: 404 }
       );
     }
 
-    return NextResponse.json({ message: 'Токен удален' });
+    return NextResponse.json({ message: 'Токен успешно удален' });
   } catch {
     return NextResponse.json(
       { error: 'Ошибка при удалении токена' },
