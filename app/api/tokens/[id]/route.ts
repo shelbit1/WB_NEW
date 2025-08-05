@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/app/lib/mongodb';
-import Token, { IToken } from '@/app/lib/models/Token';
+import Token from '@/app/lib/models/Token';
 
-export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
+export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { id } = params;
+    const { id } = await params;
     const body = await request.json();
     
     await connectDB();
@@ -12,7 +12,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     // Позволяем обновлять любые поля из модели
     const { name, apiKey, paymentStatus, comment } = body;
 
-    const updateData: Partial<IToken> = {};
+    const updateData: Record<string, any> = {};
 
     if (name) updateData.name = name;
     if (apiKey) updateData.apiKey = apiKey;
@@ -42,10 +42,10 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
   }
 }
 
-export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     await connectDB();
-    const { id } = params;
+    const { id } = await params;
     const deletedToken = await Token.findByIdAndDelete(id);
 
     if (!deletedToken) {
