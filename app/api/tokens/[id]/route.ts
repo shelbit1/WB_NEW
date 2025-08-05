@@ -12,7 +12,12 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     // Позволяем обновлять любые поля из модели
     const { name, apiKey, paymentStatus, comment } = body;
 
-    const updateData: Record<string, any> = {};
+    const updateData: {
+      name?: string;
+      apiKey?: string;
+      paymentStatus?: 'free' | 'trial' | 'pending' | 'disabled';
+      comment?: string;
+    } = {};
 
     if (name) updateData.name = name;
     if (apiKey) updateData.apiKey = apiKey;
